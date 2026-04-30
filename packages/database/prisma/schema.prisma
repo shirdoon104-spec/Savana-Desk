@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  clerkOrgId  String     @unique
+  operatingModel String  @default("hotel_restaurant")
+  mobileMoneyProvider String?
+  onboardingCompletedAt DateTime?
+  status      String     @default("active")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  properties  Property[]
+  users       TenantUser[]
+  stays       Stay[]
+  staffInvitations StaffInvitation[]
+}
+
+model TenantUser {
+  id          String   @id @default(cuid())
+  tenantId    String
+  clerkUserId String
+  role        String
+  status      String   @default("active")
+  removedAt   DateTime?
+  removedByClerkUserId String?
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, clerkUserId])
+  @@index([clerkUserId])
+  @@index([tenantId, status])
+}
+
+model StaffInvitation {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  clerkOrgId            String
+  clerkInvitationId     String?  @unique
+  invitationUrl         String?
+  email                 String
+  role                  String
+  status                String   @default("pending")
+  invitedByClerkUserId  String
+  acceptedByClerkUserId String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  tenant                Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, email])
+  @@index([clerkOrgId, email])
+}
+
+model Property {
+  id          String       @id @default(cuid())
+  tenantId    String
+  name        String
+  city        String?
+  roomCount   Int?
+  timezone    String       @default("Africa/Mogadishu")
+  currency    String       @default("USD")
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  rooms       Room[]
+  stays       Stay[]
+  restaurants Restaurant[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([tenantId])
+}
+
+model Restaurant {
+  id         String            @id @default(cuid())
+  tenantId   String
+  propertyId String
+  name       String
+  serviceStyle String?
+  property   Property          @relation(fields: [propertyId], references: [id])
+  tables     RestaurantTable[]
+  orders     Order[]
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([tenantId, propertyId])
+}
+
+model Room {
+  id         String   @id @default(cuid())
+  tenantId   String
+  propertyId String
+  number     String
+  type       String
+  status     String   @default("available")
+  property   Property @relation(fields: [propertyId], references: [id])
+  stays      Stay[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([propertyId, number])
+  @@index([tenantId, propertyId, status])
+}
+
+model Guest {
+  id        String   @id @default(cuid())
+  tenantId  String
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  stays     Stay[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, phone])
+  @@index([tenantId, email])
+}
+
+model Stay {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  propertyId         String
+  roomId             String
+  guestId            String
+  status             String    @default("active")
+  checkInAt          DateTime  @default(now())
+  expectedCheckOutAt DateTime?
+  checkOutAt         DateTime?
+  checkedInByUserId  String
+  checkedOutByUserId String?
+  notes              String?
+  tenant             Tenant    @relation(fields: [tenantId], references: [id])
+  property           Property  @relation(fields: [propertyId], references: [id])
+  room               Room      @relation(fields: [roomId], references: [id])
+  guest              Guest     @relation(fields: [guestId], references: [id])
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, roomId, status])
+  @@index([tenantId, guestId, checkInAt])
+}
+
+model RestaurantTable {
+  id           String     @id @default(cuid())
+  tenantId     String
+  propertyId   String
+  restaurantId String
+  name         String
+  status       String     @default("free")
+  qrCode       String?
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([tenantId, propertyId, restaurantId])
+}
+
+model Order {
+  id           String     @id @default(cuid())
+  tenantId     String
+  propertyId   String
+  restaurantId String
+  tableId      String?
+  status       String     @default("draft")
+  totalAmount  Decimal    @default(0)
+  currency     String     @default("USD")
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([tenantId, propertyId, restaurantId, status])
+}
+
+model Payment {
+  id                    String   @id @default(cuid())
+  tenantId              String
+  propertyId            String
+  restaurantId          String?
+  orderId               String?
+  folioId               String?
+  provider              String
+  providerTransactionId String?
+  method                String
+  status                String   @default("pending")
+  amount                Decimal
+  currency              String   @default("USD")
+  customerPhone         String?
+  idempotencyKey        String   @unique
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, propertyId, status])
+  @@index([provider, providerTransactionId])
+}
+
+model OfflineAction {
+  id             String   @id
+  tenantId       String
+  propertyId     String
+  restaurantId   String?
+  deviceId       String
+  actorUserId    String
+  entityType     String
+  entityId       String?
+  actionType     String
+  payload        Json
+  idempotencyKey String   @unique
+  status         String   @default("queued")
+  retryCount     Int      @default(0)
+  occurredAt     DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, propertyId, status])
+  @@index([deviceId, occurredAt])
+}
