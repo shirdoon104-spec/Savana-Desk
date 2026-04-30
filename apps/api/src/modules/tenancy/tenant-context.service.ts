@@ -47,7 +47,7 @@ export class TenantContextService {
       },
     });
 
-    let tenantUser = tenant?.users[0];
+    let tenantUser = tenant?.users[0] ?? null;
 
     if (!tenant) {
       return null;
@@ -102,8 +102,13 @@ export class TenantContextService {
         })
       : null;
     const role =
-      (invitation?.role as TenantRole | undefined) ??
-      this.mapClerkRoleToTenantRole(input.clerkOrgRole);
+      invitation?.role && invitation.status !== "revoked"
+        ? (invitation.role as TenantRole)
+        : null;
+
+    if (!role) {
+      return null;
+    }
 
     const tenantUser = await this.prisma.tenantUser.upsert({
       where: {
@@ -156,9 +161,5 @@ export class TenantContextService {
       user.emailAddresses?.[0]?.emailAddress.toLowerCase() ??
       null
     );
-  }
-
-  private mapClerkRoleToTenantRole(clerkRole?: string): TenantRole {
-    return clerkRole === "org:admin" ? "admin" : "front_desk";
   }
 }

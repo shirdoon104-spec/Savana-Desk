@@ -7,25 +7,16 @@ export class SetupController {
     const clerkSecretConfigured = Boolean(process.env.CLERK_SECRET_KEY);
     const databaseConfigured = Boolean(process.env.DATABASE_URL);
     const redisConfigured = Boolean(process.env.REDIS_URL);
+    const ready = clerkSecretConfigured && databaseConfigured && redisConfigured;
 
     return {
       api: {
-        ready: clerkSecretConfigured && databaseConfigured && redisConfigured,
-        clerkSecretConfigured,
-        databaseConfigured,
-        redisConfigured,
-        webOrigin: process.env.WEB_ORIGIN ?? null,
+        ready,
       },
       nextSteps: [
-        clerkSecretConfigured
-          ? "API Clerk secret is configured."
-          : "Add CLERK_SECRET_KEY to apps/api/.env.",
-        databaseConfigured
-          ? "Database URL is configured."
-          : "Add DATABASE_URL to apps/api/.env.",
-        redisConfigured
-          ? "Redis URL is configured."
-          : "Add REDIS_URL to apps/api/.env.",
+        ready
+          ? "API setup is ready."
+          : "API setup is incomplete. Check local environment files.",
       ],
     };
   }

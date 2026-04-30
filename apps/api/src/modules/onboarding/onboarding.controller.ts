@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Post,
   UseGuards,
 } from "@nestjs/common";
@@ -47,6 +48,26 @@ export class OnboardingController {
     }
 
     this.validate(body);
+
+    const existingTenant = await this.prisma.tenant.findUnique({
+      where: { clerkOrgId: organization.orgId },
+      include: {
+        users: {
+          where: {
+            clerkUserId: auth.userId,
+            role: "owner",
+            status: "active",
+          },
+          take: 1,
+        },
+      },
+    });
+
+    if (existingTenant && !existingTenant.users.length) {
+      throw new ForbiddenException(
+        "Only an active tenant owner can update onboarding.",
+      );
+    }
 
     const tenantSlug = this.slugify(organization.orgSlug ?? body.tenantName);
     const tenant = await this.prisma.tenant.upsert({

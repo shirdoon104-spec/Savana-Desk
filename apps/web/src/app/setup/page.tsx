@@ -19,10 +19,6 @@ async function getApiSetupStatus() {
     return response.json() as Promise<{
       api: {
         ready: boolean;
-        clerkSecretConfigured: boolean;
-        databaseConfigured: boolean;
-        redisConfigured: boolean;
-        webOrigin: string | null;
       };
       nextSteps: string[];
     }>;
@@ -54,24 +50,14 @@ export default async function SetupPage() {
             detail="NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in apps/web/.env.local"
           />
           <SetupCheck
-            done={Boolean(apiStatus?.api.clerkSecretConfigured)}
-            label="API Clerk secret"
-            detail="CLERK_SECRET_KEY in apps/api/.env"
-          />
-          <SetupCheck
-            done={Boolean(apiStatus?.api.databaseConfigured)}
-            label="Database URL"
-            detail="DATABASE_URL in apps/api/.env"
-          />
-          <SetupCheck
-            done={Boolean(apiStatus?.api.redisConfigured)}
-            label="Redis URL"
-            detail="REDIS_URL in apps/api/.env"
-          />
-          <SetupCheck
             done={Boolean(apiStatus)}
             label="API reachable"
             detail="GET /api/setup/status"
+          />
+          <SetupCheck
+            done={Boolean(apiStatus?.api.ready)}
+            label="API environment"
+            detail="Required API environment variables are configured"
           />
         </div>
 

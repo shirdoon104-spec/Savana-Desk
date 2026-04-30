@@ -9,7 +9,15 @@ const middleware = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
         await auth.protect();
       }
     })
-  : () => NextResponse.next();
+  : (request: Request) => {
+      const url = new URL(request.url);
+
+      if (url.pathname.startsWith("/app") || url.pathname.startsWith("/onboarding")) {
+        return NextResponse.redirect(new URL("/setup", request.url));
+      }
+
+      return NextResponse.next();
+    };
 
 export default middleware;
 
