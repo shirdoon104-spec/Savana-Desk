@@ -8,8 +8,9 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import { createClerkClient } from "@clerk/backend";
+import { IsEmail, IsIn } from "class-validator";
 import { tenantRoles, type TenantRole } from "@rayaan/shared";
+import { ClerkClientService } from "../auth/clerk-client.service";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { CurrentAuth } from "../auth/current-auth.decorator";
 import { CurrentTenant } from "../auth/current-tenant.decorator";
@@ -19,9 +20,14 @@ import type { TenantContext } from "../tenancy/tenant-context.service";
 import { PrismaService } from "../database/prisma.service";
 import type { ClerkAuthContext } from "../auth/clerk-auth.guard";
 
-interface InviteStaffBody {
-  email?: string;
-  role?: string;
+const staffRoles = tenantRoles.filter((role) => role !== "guest");
+
+class InviteStaffDto {
+  @IsEmail()
+  email!: string;
+
+  @IsIn(staffRoles)
+  role!: TenantRole;
 }
 
 function assertTenantRole(role: string | undefined): TenantRole {
@@ -52,7 +58,10 @@ function getDisplayName(user: any) {
 @Controller("team")
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class TeamController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly clerkClients: ClerkClientService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get()
   @RequirePermission("staff.read")
@@ -107,12 +116,12 @@ export class TeamController {
   async invite(
     @CurrentAuth() auth: ClerkAuthContext,
     @CurrentTenant() context: TenantContext,
-    @Body() body: InviteStaffBody,
+    @Body() body: InviteStaffDto,
   ) {
     const email = body.email?.trim().toLowerCase();
     const role = assertTenantRole(body.role);
 
-    if (!email || !email.includes("@")) {
+    if (!email) {
       throw new BadRequestException("Enter a valid email address.");
     }
 
@@ -250,12 +259,6 @@ export class TeamController {
   }
 
   private getClerkClient() {
-    const secretKey = process.env.CLERK_SECRET_KEY;
-
-    if (!secretKey) {
-      throw new BadRequestException("Clerk secret key is not configured.");
-    }
-
-    return createClerkClient({ secretKey });
+    return this.clerkClients.getClient();
   }
 }

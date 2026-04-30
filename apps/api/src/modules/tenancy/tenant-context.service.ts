@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { createClerkClient } from "@clerk/backend";
 import type { TenantRole } from "@rayaan/shared";
 import type { ClerkAuthContext } from "../auth/clerk-auth.guard";
+import { ClerkClientService } from "../auth/clerk-client.service";
 import { ClerkOrganizationResolver } from "../auth/clerk-organization.resolver";
 import { PrismaService } from "../database/prisma.service";
 
@@ -26,6 +26,7 @@ export interface TenantContext {
 @Injectable()
 export class TenantContextService {
   constructor(
+    private readonly clerkClients: ClerkClientService,
     private readonly clerkOrganizations: ClerkOrganizationResolver,
     private readonly prisma: PrismaService,
   ) {}
@@ -145,13 +146,13 @@ export class TenantContextService {
   }
 
   private async getPrimaryEmail(clerkUserId: string) {
-    const secretKey = process.env.CLERK_SECRET_KEY;
+    const clerk = this.clerkClients.getOptionalClient();
 
-    if (!secretKey) {
+    if (!clerk) {
       return null;
     }
 
-    const user = await createClerkClient({ secretKey }).users.getUser(clerkUserId);
+    const user = await clerk.users.getUser(clerkUserId);
     const primaryEmail = user.emailAddresses?.find(
       (email) => email.id === user.primaryEmailAddressId,
     );

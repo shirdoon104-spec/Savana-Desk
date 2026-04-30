@@ -6,6 +6,16 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { Transform, Type } from "class-transformer";
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+} from "class-validator";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { CurrentAuth } from "../auth/current-auth.decorator";
 import type { ClerkAuthContext } from "../auth/clerk-auth.guard";
@@ -14,16 +24,54 @@ import { PrismaService } from "../database/prisma.service";
 
 type OperatingModel = "hotel_only" | "hotel_restaurant";
 
-interface CompleteOnboardingBody {
-  operatingModel: OperatingModel;
-  tenantName: string;
-  propertyName: string;
-  city: string;
-  currency: "USD" | "SOS";
-  roomCount?: number;
-  mobileMoneyProvider: string;
+const emptyToUndefined = ({ value }: { value: unknown }) =>
+  value === "" ? undefined : value;
+
+class CompleteOnboardingDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  city!: string;
+
+  @IsIn(["USD", "SOS"])
+  currency!: "USD" | "SOS";
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  mobileMoneyProvider!: string;
+
+  @IsIn(["hotel_only", "hotel_restaurant"])
+  operatingModel!: OperatingModel;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  propertyName!: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(120)
   restaurantName?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  @MaxLength(80)
   restaurantServiceStyle?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  roomCount?: number;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  tenantName!: string;
 }
 
 @Controller("onboarding")
@@ -37,7 +85,7 @@ export class OnboardingController {
   @UseGuards(ClerkAuthGuard)
   async complete(
     @CurrentAuth() auth: ClerkAuthContext,
-    @Body() body: CompleteOnboardingBody,
+    @Body() body: CompleteOnboardingDto,
   ) {
     const organization = await this.clerkOrganizations.resolve(auth);
 
@@ -171,7 +219,7 @@ export class OnboardingController {
     };
   }
 
-  private validate(body: CompleteOnboardingBody) {
+  private validate(body: CompleteOnboardingDto) {
     if (!["hotel_only", "hotel_restaurant"].includes(body.operatingModel)) {
       throw new BadRequestException("Choose a valid operating model.");
     }

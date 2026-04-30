@@ -10,6 +10,7 @@ import { SyncController } from "./sync/sync.controller";
 import { TeamController } from "./team/team.controller";
 import { TenancyController } from "./tenancy/tenancy.controller";
 import { ClerkAuthGuard } from "./auth/clerk-auth.guard";
+import { ClerkClientService } from "./auth/clerk-client.service";
 import { ClerkOrganizationResolver } from "./auth/clerk-organization.resolver";
 import { TenantPermissionGuard } from "./auth/tenant-permission.guard";
 import { TenantContextService } from "./tenancy/tenant-context.service";
@@ -34,6 +35,7 @@ import { TenantContextService } from "./tenancy/tenant-context.service";
   ],
   providers: [
     ClerkAuthGuard,
+    ClerkClientService,
     ClerkOrganizationResolver,
     TenantContextService,
     TenantPermissionGuard,

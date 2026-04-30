@@ -8,6 +8,18 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { Transform, Type } from "class-transformer";
+import {
+  IsDateString,
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+} from "class-validator";
 import { hasTenantPermission, type TenantRole } from "@rayaan/shared";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { CurrentTenant } from "../auth/current-tenant.decorator";
@@ -15,35 +27,6 @@ import { RequirePermission } from "../auth/require-permission.decorator";
 import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import { PrismaService } from "../database/prisma.service";
 import type { TenantContext } from "../tenancy/tenant-context.service";
-
-interface CreatePropertyBody {
-  city?: string;
-  currency?: string;
-  name?: string;
-  roomCount?: number | string;
-  timezone?: string;
-}
-
-interface CreateRoomsBody {
-  floor?: string;
-  from?: number | string;
-  prefix?: string;
-  to?: number | string;
-  type?: string;
-}
-
-interface UpdateRoomStatusBody {
-  status?: string;
-}
-
-interface CheckInBody {
-  email?: string;
-  expectedCheckOutAt?: string;
-  firstName?: string;
-  lastName?: string;
-  notes?: string;
-  phone?: string;
-}
 
 const roomStatuses = [
   "available",
@@ -54,6 +37,102 @@ const roomStatuses = [
 ] as const;
 
 type RoomStatus = (typeof roomStatuses)[number];
+
+const emptyToUndefined = ({ value }: { value: unknown }) =>
+  value === "" ? undefined : value;
+
+class CreatePropertyDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  city?: string;
+
+  @IsOptional()
+  @IsIn(["USD", "SOS"])
+  currency?: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name!: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  roomCount?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  timezone?: string;
+}
+
+class CreateRoomsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  floor?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  from!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  prefix?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  to!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  type?: string;
+}
+
+class UpdateRoomStatusDto {
+  @IsIn(roomStatuses)
+  status!: RoomStatus;
+}
+
+class CheckInDto {
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsEmail()
+  @MaxLength(160)
+  email?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsDateString()
+  expectedCheckOutAt?: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  firstName!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  lastName!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  phone?: string;
+}
 
 function allowedRoomStatusesForRole(role: TenantRole): RoomStatus[] {
   if (role === "owner" || role === "admin") {
@@ -155,7 +234,7 @@ export class PropertiesController {
   @RequirePermission("property.manage")
   async create(
     @CurrentTenant() context: TenantContext,
-    @Body() body: CreatePropertyBody,
+    @Body() body: CreatePropertyDto,
   ) {
     const name = body.name?.trim();
     const city = body.city?.trim();
@@ -188,7 +267,7 @@ export class PropertiesController {
   async createRooms(
     @CurrentTenant() context: TenantContext,
     @Param("propertyId") propertyId: string,
-    @Body() body: CreateRoomsBody,
+    @Body() body: CreateRoomsDto,
   ) {
     const property = await this.findTenantProperty(context.tenant.id, propertyId);
     const from = this.requiredPositiveInteger(body.from, "Starting room number");
@@ -242,7 +321,7 @@ export class PropertiesController {
     @CurrentTenant() context: TenantContext,
     @Param("propertyId") propertyId: string,
     @Param("roomId") roomId: string,
-    @Body() body: CheckInBody,
+    @Body() body: CheckInDto,
   ) {
     const firstName = body.firstName?.trim();
     const lastName = body.lastName?.trim();
@@ -371,7 +450,7 @@ export class PropertiesController {
     @CurrentTenant() context: TenantContext,
     @Param("propertyId") propertyId: string,
     @Param("roomId") roomId: string,
-    @Body() body: UpdateRoomStatusBody,
+    @Body() body: UpdateRoomStatusDto,
   ) {
     const status = body.status?.trim();
 

@@ -1,4 +1,15 @@
 import { BadRequestException, Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Type } from "class-transformer";
+import {
+  IsEmail,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+} from "class-validator";
 import {
   ManualMobileMoneyProvider,
   StripeProvider,
@@ -11,6 +22,60 @@ import { RequirePermission } from "../auth/require-permission.decorator";
 import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import type { TenantContext } from "../tenancy/tenant-context.service";
 
+class InitiatePaymentDto implements PaymentRequest {
+  @IsNumber()
+  @Min(0.01)
+  @Type(() => Number)
+  amount!: number;
+
+  @IsIn(["USD", "SOS"])
+  currency!: "USD" | "SOS";
+
+  @IsOptional()
+  @IsEmail()
+  customerEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  customerPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  folioId?: string;
+
+  @IsString()
+  @MaxLength(128)
+  idempotencyKey!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  orderId?: string;
+
+  @IsIn(paymentProviders)
+  provider!: PaymentRequest["provider"];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  restaurantId?: string;
+
+  @IsString()
+  @MaxLength(128)
+  propertyId!: string;
+
+  @IsString()
+  @MaxLength(128)
+  tenantId!: string;
+}
+
 @Controller("payments")
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class PaymentsController {
@@ -18,7 +83,7 @@ export class PaymentsController {
   @RequirePermission("billing.manage")
   async initiate(
     @CurrentTenant() context: TenantContext,
-    @Body() request: PaymentRequest,
+    @Body() request: InitiatePaymentDto,
   ) {
     if (request.tenantId !== context.tenant.id) {
       throw new BadRequestException("Payment tenant scope is invalid.");
