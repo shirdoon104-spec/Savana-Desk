@@ -148,7 +148,9 @@ input {
   color: var(--ink);
   font: inherit;
   min-height: 42px;
+  min-width: 0;
   padding: 0 12px;
+  width: 100%;
 }
 
 select {
@@ -159,7 +161,9 @@ select {
   color: var(--ink);
   font: inherit;
   min-height: 42px;
+  min-width: 0;
   padding: 0 12px;
+  width: 100%;
 }
 
 button:hover {
@@ -908,12 +912,46 @@ button:hover {
 }
 
 .restaurant-table-card {
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+  color: var(--foreground);
+  cursor: pointer;
   display: grid;
   gap: 8px;
+  justify-items: start;
   min-width: 0;
   padding: 14px;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.restaurant-table-card:hover,
+.restaurant-table-card[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.restaurant-table-card[data-status="free"] {
+  border-left: 5px solid #12b76a;
+}
+
+.restaurant-table-card[data-status="reserved"] {
+  border-left: 5px solid #7c3aed;
+}
+
+.restaurant-table-card[data-status="seated"],
+.restaurant-table-card[data-status="ordering"] {
+  border-left: 5px solid #f79009;
+}
+
+.restaurant-table-card[data-status="served"] {
+  border-left: 5px solid #2e90fa;
+}
+
+.restaurant-table-card[data-status="cleaning"] {
+  border-left: 5px solid #667085;
 }
 
 .restaurant-table-card svg {
@@ -927,6 +965,72 @@ button:hover {
   color: var(--muted);
   overflow-wrap: anywhere;
   text-transform: capitalize;
+}
+
+.table-card-topline,
+.table-card-meta {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.table-card-topline {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.table-card-topline span {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.table-card-meta svg {
+  height: 16px;
+  width: 16px;
+}
+
+.table-service-panel {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  margin-top: 20px;
+  padding-top: 18px;
+}
+
+.table-service-panel h3 {
+  font-size: 24px;
+  margin: 4px 0 8px;
+}
+
+.table-service-panel p:not(.eyebrow) {
+  color: var(--muted);
+}
+
+.table-service-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.table-service-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 6px;
+  min-width: 0;
+}
+
+.table-service-form button {
+  width: 100%;
 }
 
 .restaurant-table-card select,
@@ -1017,6 +1121,33 @@ button:hover {
   display: grid;
   gap: 10px;
   margin-top: 16px;
+}
+
+.order-section-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.order-section-heading h3 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.order-section-heading span {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.order-history-row {
+  background: #f8fafc;
 }
 
 .kitchen-board {
@@ -1236,6 +1367,8 @@ button:hover {
   .restaurant-menu-form,
   .property-layout,
   .room-grid,
+  .table-service-form,
+  .table-service-panel,
   .restaurant-table-grid,
   .restaurant-order-form,
   .room-status-counts,

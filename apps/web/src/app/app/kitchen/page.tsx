@@ -90,7 +90,9 @@ export default function KitchenPage() {
   const orders = useMemo<KitchenOrder[]>(() => {
     return (data?.restaurants ?? []).flatMap((restaurant) =>
       restaurant.orders
-        .filter((order) => !["draft", "served", "cancelled"].includes(order.status))
+        .filter(
+          (order) => !["draft", "served", "closed", "cancelled"].includes(order.status),
+        )
         .map((order) => ({
           ...order,
           restaurantId: restaurant.id,

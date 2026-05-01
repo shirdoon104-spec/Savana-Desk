@@ -22,6 +22,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import type { TenantRole } from "@rayaan/shared";
+import { ClerkClientService } from "../auth/clerk-client.service";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { CurrentTenant } from "../auth/current-tenant.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -29,8 +30,24 @@ import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import { PrismaService } from "../database/prisma.service";
 import type { TenantContext } from "../tenancy/tenant-context.service";
 
-const tableStatuses = ["free", "seated", "ordering", "served", "cleaning"] as const;
-const orderStatuses = ["draft", "sent", "preparing", "ready", "served", "cancelled"] as const;
+const tableStatuses = [
+  "free",
+  "reserved",
+  "seated",
+  "ordering",
+  "served",
+  "cleaning",
+] as const;
+const orderStatuses = [
+  "draft",
+  "sent",
+  "preparing",
+  "ready",
+  "served",
+  "closed",
+  "cancelled",
+] as const;
+const waiterRoles = ["owner", "admin", "restaurant_manager", "waiter"] as const;
 
 type TableStatus = (typeof tableStatuses)[number];
 type OrderStatus = (typeof orderStatuses)[number];
@@ -58,6 +75,12 @@ class CreateTableDto {
   @MinLength(1)
   @MaxLength(40)
   name!: string;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  coverCount?: number;
 }
 
 class CreateMenuCategoryDto {
@@ -108,6 +131,28 @@ class CreateRestaurantDto {
 class UpdateTableStatusDto {
   @IsIn(tableStatuses)
   status!: TableStatus;
+}
+
+class UpdateTableDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  assignedWaiterName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  assignedWaiterUserId?: string;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  coverCount?: number;
+
+  @IsIn(tableStatuses)
+  @IsOptional()
+  status?: TableStatus;
 }
 
 class CreateOrderDto {
@@ -176,10 +221,24 @@ function allowedTableStatusesForRole(role: TenantRole): TableStatus[] {
   }
 
   if (role === "waiter") {
-    return ["free", "seated", "ordering", "served"];
+    return ["free", "reserved", "seated", "ordering", "served"];
   }
 
   return [];
+}
+
+function getPrimaryEmail(user: any) {
+  const primaryEmail = user.emailAddresses?.find(
+    (email: any) => email.id === user.primaryEmailAddressId,
+  );
+
+  return primaryEmail?.emailAddress ?? user.emailAddresses?.[0]?.emailAddress;
+}
+
+function getDisplayName(user: any) {
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ");
+
+  return fullName || getPrimaryEmail(user) || user.id;
 }
 
 function serializeOrder(order: {
@@ -221,7 +280,10 @@ function serializeOrder(order: {
 @Controller("restaurants")
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class RestaurantsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly clerkClients: ClerkClientService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get()
   @RequirePermission("restaurant.read")
@@ -267,6 +329,7 @@ export class RestaurantsController {
       },
       orderBy: { createdAt: "asc" },
     });
+    const assignableUsers = await this.listAssignableWaiters(context.tenant.id);
 
     return {
       allowedOrderStatuses: allowedOrderStatusesForRole(context.role),
@@ -279,6 +342,7 @@ export class RestaurantsController {
         clerkUserId: context.tenantUser.clerkUserId,
         role: context.role,
       },
+      assignableWaiters: assignableUsers,
       properties,
       tenant: context.tenant,
       restaurants: restaurants.map((restaurant) => ({
@@ -310,6 +374,9 @@ export class RestaurantsController {
           price: Number(item.price),
         })),
         tables: restaurant.tables.map((table) => ({
+          assignedWaiterName: table.assignedWaiterName,
+          assignedWaiterUserId: table.assignedWaiterUserId,
+          coverCount: table.coverCount,
           id: table.id,
           name: table.name,
           qrCode: table.qrCode,
@@ -440,9 +507,48 @@ export class RestaurantsController {
     return this.prisma.restaurantTable.create({
       data: {
         name,
+        coverCount: body.coverCount ?? 0,
         propertyId: restaurant.propertyId,
         restaurantId: restaurant.id,
         tenantId: context.tenant.id,
+      },
+    });
+  }
+
+  @Patch(":restaurantId/tables/:tableId")
+  @RequirePermission("restaurant.read")
+  async updateTable(
+    @CurrentTenant() context: TenantContext,
+    @Param("restaurantId") restaurantId: string,
+    @Param("tableId") tableId: string,
+    @Body() body: UpdateTableDto,
+  ) {
+    await this.findTenantRestaurant(context.tenant.id, restaurantId);
+    const table = await this.findTenantTable(
+      context.tenant.id,
+      restaurantId,
+      tableId,
+    );
+
+    if (body.status && !allowedTableStatusesForRole(context.role).includes(body.status)) {
+      throw new BadRequestException("Your role cannot set tables to that status.");
+    }
+
+    if (
+      (body.coverCount !== undefined || body.assignedWaiterName !== undefined) &&
+      !["owner", "admin", "restaurant_manager", "waiter"].includes(context.role)
+    ) {
+      throw new BadRequestException("Your role cannot update table service details.");
+    }
+
+    return this.prisma.restaurantTable.update({
+      where: { id: table.id },
+      data: {
+        ...(body.status === "free"
+          ? { assignedWaiterName: null, assignedWaiterUserId: null }
+          : await this.resolveWaiterAssignment(context.tenant.id, body)),
+        coverCount: body.status === "free" ? 0 : body.coverCount,
+        status: body.status,
       },
     });
   }
@@ -468,7 +574,12 @@ export class RestaurantsController {
 
     return this.prisma.restaurantTable.update({
       where: { id: table.id },
-      data: { status: body.status },
+      data: {
+        assignedWaiterName: body.status === "free" ? null : undefined,
+        assignedWaiterUserId: body.status === "free" ? null : undefined,
+        coverCount: body.status === "free" ? 0 : undefined,
+        status: body.status,
+      },
     });
   }
 
@@ -594,10 +705,42 @@ export class RestaurantsController {
       throw new BadRequestException("Your role cannot set orders to that status.");
     }
 
-    const updatedOrder = await this.prisma.order.update({
-      where: { id: order.id },
-      data: { status: body.status },
-      include: { items: true },
+    if (["closed", "cancelled"].includes(order.status)) {
+      throw new BadRequestException("This order is already final.");
+    }
+
+    if (body.status === "closed" && order.status !== "served") {
+      throw new BadRequestException("Only served orders can be closed.");
+    }
+
+    if (body.status === "served" && !["ready", "served"].includes(order.status)) {
+      throw new BadRequestException("Only ready orders can be marked served.");
+    }
+
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.order.update({
+        where: { id: order.id },
+        data: { status: body.status },
+        include: { items: true },
+      });
+
+      if (order.tableId) {
+        const tableStatus = this.tableStatusForOrderStatus(body.status);
+
+        if (tableStatus) {
+          await tx.restaurantTable.update({
+            where: { id: order.tableId },
+            data: {
+              assignedWaiterName: tableStatus === "free" ? null : undefined,
+              assignedWaiterUserId: tableStatus === "free" ? null : undefined,
+              coverCount: tableStatus === "free" ? 0 : undefined,
+              status: tableStatus,
+            },
+          });
+        }
+      }
+
+      return updatedOrder;
     });
 
     return serializeOrder(updatedOrder);
@@ -675,5 +818,97 @@ export class RestaurantsController {
     }
 
     return category;
+  }
+
+  private async listAssignableWaiters(tenantId: string) {
+    const users = await this.prisma.tenantUser.findMany({
+      orderBy: { createdAt: "asc" },
+      where: {
+        role: { in: [...waiterRoles] },
+        status: "active",
+        tenantId,
+      },
+    });
+    const clerk = this.clerkClients.getClient();
+    const clerkUsers = await Promise.allSettled(
+      users.map((user) => clerk.users.getUser(user.clerkUserId)),
+    );
+
+    return users.map((user, index) => {
+      const clerkUser =
+        clerkUsers[index].status === "fulfilled" ? clerkUsers[index].value : null;
+      const name = clerkUser ? getDisplayName(clerkUser) : user.clerkUserId;
+
+      return {
+        clerkUserId: user.clerkUserId,
+        email: clerkUser ? getPrimaryEmail(clerkUser) : null,
+        name,
+        role: user.role,
+      };
+    });
+  }
+
+  private async resolveWaiterAssignment(
+    tenantId: string,
+    body: UpdateTableDto,
+  ): Promise<{
+    assignedWaiterName?: string | null;
+    assignedWaiterUserId?: string | null;
+  }> {
+    if (body.assignedWaiterUserId === undefined) {
+      return body.assignedWaiterName === undefined
+        ? {}
+        : { assignedWaiterName: body.assignedWaiterName.trim() || null };
+    }
+
+    const waiterUserId = body.assignedWaiterUserId.trim();
+
+    if (!waiterUserId) {
+      return {
+        assignedWaiterName: null,
+        assignedWaiterUserId: null,
+      };
+    }
+
+    const waiter = await this.prisma.tenantUser.findFirst({
+      where: {
+        clerkUserId: waiterUserId,
+        role: { in: [...waiterRoles] },
+        status: "active",
+        tenantId,
+      },
+    });
+
+    if (!waiter) {
+      throw new BadRequestException("Choose an active waiter from this workspace.");
+    }
+
+    const clerk = this.clerkClients.getClient();
+    const clerkUser = await clerk.users.getUser(waiter.clerkUserId).catch(() => null);
+
+    return {
+      assignedWaiterName: clerkUser ? getDisplayName(clerkUser) : waiter.clerkUserId,
+      assignedWaiterUserId: waiter.clerkUserId,
+    };
+  }
+
+  private tableStatusForOrderStatus(status: OrderStatus): TableStatus | null {
+    if (status === "sent" || status === "preparing" || status === "ready") {
+      return "ordering";
+    }
+
+    if (status === "served") {
+      return "served";
+    }
+
+    if (status === "closed") {
+      return "cleaning";
+    }
+
+    if (status === "cancelled") {
+      return "free";
+    }
+
+    return null;
   }
 }

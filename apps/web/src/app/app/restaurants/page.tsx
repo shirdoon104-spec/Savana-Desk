@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth, useOrganization } from "@clerk/nextjs";
-import { Plus, RefreshCw, ReceiptText, Utensils } from "lucide-react";
+import { Plus, RefreshCw, ReceiptText, Users, Utensils } from "lucide-react";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -16,6 +16,12 @@ interface RestaurantResponse {
     clerkUserId: string;
     role: string;
   };
+  assignableWaiters: Array<{
+    clerkUserId: string;
+    email: string | null;
+    name: string;
+    role: string;
+  }>;
   properties: Array<{
     id: string;
     name: string;
@@ -71,6 +77,9 @@ interface RestaurantResponse {
     };
     serviceStyle: string | null;
     tables: Array<{
+      assignedWaiterName: string | null;
+      assignedWaiterUserId: string | null;
+      coverCount: number;
       id: string;
       name: string;
       qrCode: string | null;
@@ -98,6 +107,10 @@ function formatLabel(value: string) {
   return value.replaceAll("_", " ");
 }
 
+function isCompletedOrder(status: string) {
+  return ["closed", "cancelled"].includes(status);
+}
+
 export default function RestaurantsPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
@@ -115,6 +128,10 @@ export default function RestaurantsPage() {
   const [newMenuItemDescription, setNewMenuItemDescription] = useState("");
   const [newMenuItemName, setNewMenuItemName] = useState("");
   const [newMenuItemPrice, setNewMenuItemPrice] = useState("");
+  const [selectedTableId, setSelectedTableId] = useState("");
+  const [tableCoverCount, setTableCoverCount] = useState("0");
+  const [tableWaiterUserId, setTableWaiterUserId] = useState("");
+  const [tableStatus, setTableStatus] = useState("");
   const [orderTableId, setOrderTableId] = useState("");
   const [orderMenuItemId, setOrderMenuItemId] = useState("");
   const [orderItemNotes, setOrderItemNotes] = useState("");
@@ -145,6 +162,57 @@ export default function RestaurantsPage() {
 
     return orderMap;
   }, [selectedRestaurant?.orders]);
+
+  const selectedTable = useMemo(
+    () =>
+      selectedRestaurant?.tables.find((table) => table.id === selectedTableId) ??
+      selectedRestaurant?.tables[0] ??
+      null,
+    [selectedRestaurant?.tables, selectedTableId],
+  );
+
+  const activeTableOrder = useMemo(() => {
+    if (!selectedTable) {
+      return null;
+    }
+
+    return (
+      (ordersByTable.get(selectedTable.id) ?? []).find(
+        (order) => !isCompletedOrder(order.status),
+      ) ?? null
+    );
+  }, [ordersByTable, selectedTable]);
+
+  const seatedTablesCount = useMemo(
+    () =>
+      selectedRestaurant?.tables.filter((table) =>
+        ["reserved", "seated", "ordering", "served"].includes(table.status),
+      ).length ?? 0,
+    [selectedRestaurant?.tables],
+  );
+
+  const coverCount = useMemo(
+    () =>
+      selectedRestaurant?.tables.reduce(
+        (total, table) => total + table.coverCount,
+        0,
+      ) ?? 0,
+    [selectedRestaurant?.tables],
+  );
+  const activeOrders = useMemo(
+    () =>
+      (selectedRestaurant?.orders ?? []).filter(
+        (order) => !isCompletedOrder(order.status),
+      ),
+    [selectedRestaurant?.orders],
+  );
+  const completedOrders = useMemo(
+    () =>
+      (selectedRestaurant?.orders ?? []).filter((order) =>
+        isCompletedOrder(order.status),
+      ),
+    [selectedRestaurant?.orders],
+  );
 
   const orderTotal = useMemo(() => {
     return orderItems.reduce((total, item) => {
@@ -205,6 +273,21 @@ export default function RestaurantsPage() {
   useEffect(() => {
     void loadRestaurants();
   }, [getToken, isLoaded, isSignedIn, organization]);
+
+  useEffect(() => {
+    if (!selectedTable) {
+      setSelectedTableId("");
+      setTableCoverCount("0");
+      setTableWaiterUserId("");
+      setTableStatus("");
+      return;
+    }
+
+    setSelectedTableId((current) => current || selectedTable.id);
+    setTableCoverCount(String(selectedTable.coverCount));
+    setTableWaiterUserId(selectedTable.assignedWaiterUserId ?? "");
+    setTableStatus(selectedTable.status);
+  }, [selectedTable]);
 
   async function createRestaurant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -390,6 +473,42 @@ export default function RestaurantsPage() {
     await loadRestaurants();
   }
 
+  async function updateTableDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const token = await getOrganizationToken();
+    const restaurantId = selectedRestaurant?.id;
+    const tableId = selectedTable?.id;
+
+    if (!token || !restaurantId || !tableId) {
+      setError("Choose a table before updating table service details.");
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/tables/${tableId}`,
+      {
+        body: JSON.stringify({
+          assignedWaiterUserId: tableWaiterUserId,
+          coverCount: Number(tableCoverCount) || 0,
+          status: tableStatus,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not update table details."));
+      return;
+    }
+
+    await loadRestaurants();
+  }
+
   async function createOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -512,27 +631,12 @@ export default function RestaurantsPage() {
           <strong>{data?.restaurants.length ?? 0}</strong>
         </div>
         <div>
-          <span>Tables</span>
-          <strong>
-            {data?.restaurants.reduce(
-              (total, restaurant) => total + restaurant.tables.length,
-              0,
-            ) ?? 0}
-          </strong>
+          <span>Active tables</span>
+          <strong>{seatedTablesCount}</strong>
         </div>
         <div>
-          <span>Open orders</span>
-          <strong>
-            {data?.restaurants.reduce(
-              (total, restaurant) =>
-                total +
-                restaurant.orders.filter(
-                  (order) =>
-                    !["served", "cancelled"].includes(order.status),
-                ).length,
-              0,
-            ) ?? 0}
-          </strong>
+          <span>Covers seated</span>
+          <strong>{coverCount}</strong>
         </div>
         <div>
           <span>Current role</span>
@@ -643,24 +747,77 @@ export default function RestaurantsPage() {
                 <div className="restaurant-table-grid">
                   {selectedRestaurant.tables.map((table) => {
                     const tableOrders = ordersByTable.get(table.id) ?? [];
+                    const activeOrder = tableOrders.find(
+                      (order) => !isCompletedOrder(order.status),
+                    );
 
                     return (
-                      <div className="restaurant-table-card" key={table.id}>
-                        <Utensils aria-hidden="true" />
+                      <button
+                        className="restaurant-table-card"
+                        data-selected={selectedTable?.id === table.id}
+                        data-status={table.status}
+                        key={table.id}
+                        onClick={() => {
+                          setSelectedTableId(table.id);
+                          setOrderTableId(table.id);
+                        }}
+                        type="button"
+                      >
+                        <span className="table-card-topline">
+                          <Utensils aria-hidden="true" />
+                          <span>{formatLabel(table.status)}</span>
+                        </span>
                         <strong>{table.name}</strong>
+                        <span className="table-card-meta">
+                          <Users aria-hidden="true" />
+                          {table.coverCount} covers
+                        </span>
+                        <span>
+                          {table.assignedWaiterName
+                            ? table.assignedWaiterName
+                            : "No waiter assigned"}
+                        </span>
+
+                        {activeOrder ? (
+                          <small>
+                            Active: {activeOrder.currency}{" "}
+                            {activeOrder.totalAmount.toFixed(2)} -{" "}
+                            {formatLabel(activeOrder.status)}
+                          </small>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {!selectedRestaurant.tables.length ? (
+                  <div className="empty-state">No tables have been created yet.</div>
+                ) : null}
+
+                {selectedTable ? (
+                  <div className="table-service-panel">
+                    <div>
+                      <p className="eyebrow">Selected table</p>
+                      <h3>{selectedTable.name}</h3>
+                      <p>
+                        {activeTableOrder
+                          ? `${activeTableOrder.currency} ${activeTableOrder.totalAmount.toFixed(2)} open order`
+                          : "No open order on this table"}
+                      </p>
+                    </div>
+                    <form className="table-service-form" onSubmit={updateTableDetails}>
+                      <label>
+                        Status
                         {data?.allowedTableStatuses.length ? (
                           <select
-                            aria-label={`Status for ${table.name}`}
-                            onChange={(event) =>
-                              updateTableStatus(table.id, event.target.value)
-                            }
-                            value={table.status}
+                            onChange={(event) => setTableStatus(event.target.value)}
+                            value={tableStatus}
                           >
-                            {data.allowedTableStatuses.includes(table.status)
+                            {data.allowedTableStatuses.includes(tableStatus)
                               ? null
                               : (
-                                  <option value={table.status}>
-                                    {formatLabel(table.status)}
+                                  <option value={tableStatus}>
+                                    {formatLabel(tableStatus)}
                                   </option>
                                 )}
                             {data.allowedTableStatuses.map((status) => (
@@ -670,22 +827,37 @@ export default function RestaurantsPage() {
                             ))}
                           </select>
                         ) : (
-                          <span>{formatLabel(table.status)}</span>
+                          <input disabled value={formatLabel(tableStatus)} />
                         )}
-
-                        {tableOrders.slice(0, 2).map((order) => (
-                          <small key={order.id}>
-                            {order.currency} {order.totalAmount.toFixed(2)} -{" "}
-                            {formatLabel(order.status)}
-                          </small>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {!selectedRestaurant.tables.length ? (
-                  <div className="empty-state">No tables have been created yet.</div>
+                      </label>
+                      <label>
+                        Covers
+                        <input
+                          min="0"
+                          onChange={(event) => setTableCoverCount(event.target.value)}
+                          type="number"
+                          value={tableCoverCount}
+                        />
+                      </label>
+                      <label>
+                        Waiter
+                        <select
+                          onChange={(event) =>
+                            setTableWaiterUserId(event.target.value)
+                          }
+                          value={tableWaiterUserId}
+                        >
+                          <option value="">No waiter assigned</option>
+                          {(data?.assignableWaiters ?? []).map((waiter) => (
+                            <option key={waiter.clerkUserId} value={waiter.clerkUserId}>
+                              {waiter.name} - {formatLabel(waiter.role)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button type="submit">Save table</button>
+                    </form>
+                  </div>
                 ) : null}
               </section>
 
@@ -884,7 +1056,12 @@ export default function RestaurantsPage() {
                 ) : null}
 
                 <div className="restaurant-order-list">
-                  {selectedRestaurant.orders.map((order) => (
+                  <div className="order-section-heading">
+                    <h3>Active orders</h3>
+                    <span>{activeOrders.length}</span>
+                  </div>
+
+                  {activeOrders.map((order) => (
                     <div className="team-row" key={order.id}>
                       <div>
                         <strong>
@@ -939,8 +1116,45 @@ export default function RestaurantsPage() {
                     </div>
                   ))}
 
-                  {!selectedRestaurant.orders.length ? (
-                    <div className="empty-state">No orders yet.</div>
+                  {!activeOrders.length ? (
+                    <div className="empty-state">No active orders.</div>
+                  ) : null}
+
+                  <div className="order-section-heading">
+                    <h3>Completed orders</h3>
+                    <span>{completedOrders.length}</span>
+                  </div>
+
+                  {completedOrders.map((order) => (
+                    <div className="team-row order-history-row" key={order.id}>
+                      <div>
+                        <strong>
+                          {order.currency} {order.totalAmount.toFixed(2)}
+                        </strong>
+                        <span>
+                          {order.tableId
+                            ? selectedRestaurant.tables.find(
+                                (table) => table.id === order.tableId,
+                              )?.name ?? "Table"
+                            : "Counter / takeaway"}
+                        </span>
+                        <span>{new Date(order.createdAt).toLocaleString()}</span>
+                        {order.items.map((item) => (
+                          <small key={item.id}>
+                            {item.quantity}x {item.name}
+                            {item.notes ? ` - ${item.notes}` : ""}
+                          </small>
+                        ))}
+                      </div>
+                      <div className="team-row-actions">
+                        <ReceiptText aria-hidden="true" />
+                        <span className="role-pill">{formatLabel(order.status)}</span>
+                      </div>
+                    </div>
+                  ))}
+
+                  {!completedOrders.length ? (
+                    <div className="empty-state">No completed orders yet.</div>
                   ) : null}
                 </div>
               </section>
