@@ -629,18 +629,13 @@ export default function RestaurantsPage() {
       return;
     }
 
-    if (!["KES", "USD"].includes(order.currency)) {
-      setError("Paystack test payments support KES or USD for this workspace.");
-      return;
-    }
-
     setPayingOrderId(order.id);
     setError(null);
 
     const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/payments/initiate`, {
       body: JSON.stringify({
         amount: order.totalAmount,
-        currency: order.currency,
+        currency: "KES",
         customerEmail:
           user?.primaryEmailAddress?.emailAddress ??
           `guest-${data.tenant.id}@rayaan.local`,
@@ -1161,10 +1156,7 @@ export default function RestaurantsPage() {
                       <div className="team-row-actions">
                         <ReceiptText aria-hidden="true" />
                         <button
-                          disabled={
-                            payingOrderId === order.id ||
-                            !["KES", "USD"].includes(order.currency)
-                          }
+                          disabled={payingOrderId === order.id}
                           onClick={() => void payOrderWithPaystack(order)}
                           title="Pay with Paystack"
                           type="button"

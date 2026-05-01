@@ -142,7 +142,12 @@ export class PaymentsController {
     }
 
     const provider = this.getProvider(request.provider);
-    const result = await provider.initiatePayment(request);
+    const result = await provider.initiatePayment(request).catch((error) => {
+      const message =
+        error instanceof Error ? error.message : "Could not start payment.";
+
+      throw new BadRequestException(message);
+    });
     const checkout = result.raw as {
       access_code?: string;
       authorization_url?: string;
