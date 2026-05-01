@@ -224,9 +224,20 @@ export class PaymentsController {
       throw new BadRequestException("Verified payment amount does not match.");
     }
 
-    return this.prisma.payment.update({
-      where: { id: payment.id },
-      data: { status: result.status },
+    return this.prisma.$transaction(async (tx) => {
+      const updatedPayment = await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: result.status },
+      });
+
+      if (result.status === "paid") {
+        await closeRestaurantOrderForPayment(tx, {
+          orderId: payment.orderId,
+          tenantId: payment.tenantId,
+        });
+      }
+
+      return updatedPayment;
     });
   }
 
@@ -302,9 +313,18 @@ export class PaystackWebhookController {
           (eventData.data?.amount === expectedAmount &&
             eventData.data.currency === payment.currency)
         ) {
-          await this.prisma.payment.update({
-            where: { id: payment.id },
-            data: { status: result.status },
+          await this.prisma.$transaction(async (tx) => {
+            await tx.payment.update({
+              where: { id: payment.id },
+              data: { status: result.status },
+            });
+
+            if (result.status === "paid") {
+              await closeRestaurantOrderForPayment(tx, {
+                orderId: payment.orderId,
+                tenantId: payment.tenantId,
+              });
+            }
           });
         }
       }
@@ -332,5 +352,40 @@ export class PaystackWebhookController {
       expectedBuffer.length === signatureBuffer.length &&
       timingSafeEqual(expectedBuffer, signatureBuffer)
     );
+  }
+}
+
+async function closeRestaurantOrderForPayment(
+  tx: {
+    order: Pick<PrismaService["order"], "findFirst" | "update">;
+    restaurantTable: Pick<PrismaService["restaurantTable"], "update">;
+  },
+  payment: { orderId: string | null; tenantId: string },
+) {
+  if (!payment.orderId) {
+    return;
+  }
+
+  const order = await tx.order.findFirst({
+    where: {
+      id: payment.orderId,
+      tenantId: payment.tenantId,
+    },
+  });
+
+  if (!order || ["closed", "cancelled"].includes(order.status)) {
+    return;
+  }
+
+  await tx.order.update({
+    where: { id: order.id },
+    data: { status: "closed" },
+  });
+
+  if (order.tableId) {
+    await tx.restaurantTable.update({
+      where: { id: order.tableId },
+      data: { status: "cleaning" },
+    });
   }
 }
