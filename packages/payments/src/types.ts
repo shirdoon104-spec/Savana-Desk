@@ -2,7 +2,7 @@ import type { PaymentProvider, PaymentStatus, TenantScope } from "@rayaan/shared
 
 export interface MoneyAmount {
   amount: number;
-  currency: "USD" | "SOS";
+  currency: "KES" | "USD" | "SOS";
 }
 
 export interface PaymentRequest extends TenantScope, MoneyAmount {

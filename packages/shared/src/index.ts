@@ -72,6 +72,7 @@ export function hasTenantPermission(
 }
 
 export const paymentProviders = [
+  "paystack",
   "stripe",
   "edahab",
   "evc_plus",

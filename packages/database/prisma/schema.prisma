@@ -256,6 +256,8 @@ model Payment {
   status                String   @default("pending")
   amount                Decimal
   currency              String   @default("USD")
+  accessCode            String?
+  checkoutUrl           String?
   customerPhone         String?
   idempotencyKey        String   @unique
   createdAt             DateTime @default(now())

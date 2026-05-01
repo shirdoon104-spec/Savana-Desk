@@ -1,7 +1,14 @@
 "use client";
 
-import { useAuth, useOrganization } from "@clerk/nextjs";
-import { Plus, RefreshCw, ReceiptText, Users, Utensils } from "lucide-react";
+import { useAuth, useOrganization, useUser } from "@clerk/nextjs";
+import {
+  CreditCard,
+  Plus,
+  RefreshCw,
+  ReceiptText,
+  Users,
+  Utensils,
+} from "lucide-react";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -88,6 +95,13 @@ interface RestaurantResponse {
   }>;
 }
 
+interface PaymentInitiationResponse {
+  raw?: {
+    authorization_url?: string;
+  };
+  status: string;
+}
+
 async function readApiMessage(response: Response, fallback: string) {
   try {
     const payload = (await response.json()) as { message?: string | string[] };
@@ -114,6 +128,7 @@ function isCompletedOrder(status: string) {
 export default function RestaurantsPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
+  const { user } = useUser();
   const [data, setData] = useState<RestaurantResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
@@ -140,6 +155,7 @@ export default function RestaurantsPage() {
     Array<{ menuItemId: string; notes: string; quantity: number }>
   >([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
 
   const selectedRestaurant = useMemo(
     () =>
@@ -601,6 +617,64 @@ export default function RestaurantsPage() {
     }
 
     await loadRestaurants();
+  }
+
+  async function payOrderWithPaystack(
+    order: RestaurantResponse["restaurants"][number]["orders"][number],
+  ) {
+    const token = await getOrganizationToken();
+
+    if (!token || !data || !selectedRestaurant) {
+      setError("Choose a restaurant before taking payment.");
+      return;
+    }
+
+    if (!["KES", "USD"].includes(order.currency)) {
+      setError("Paystack test payments support KES or USD for this workspace.");
+      return;
+    }
+
+    setPayingOrderId(order.id);
+    setError(null);
+
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/payments/initiate`, {
+      body: JSON.stringify({
+        amount: order.totalAmount,
+        currency: order.currency,
+        customerEmail:
+          user?.primaryEmailAddress?.emailAddress ??
+          `guest-${data.tenant.id}@rayaan.local`,
+        description: `Restaurant order ${order.id}`,
+        idempotencyKey: `paystack-${order.id}`,
+        orderId: order.id,
+        propertyId: selectedRestaurant.property.id,
+        provider: "paystack",
+        restaurantId: selectedRestaurant.id,
+        tenantId: data.tenant.id,
+      }),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    setPayingOrderId(null);
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not start Paystack checkout."));
+      return;
+    }
+
+    const payment = (await response.json()) as PaymentInitiationResponse;
+    const checkoutUrl = payment.raw?.authorization_url;
+
+    if (!checkoutUrl) {
+      setError("Paystack checkout URL was not returned.");
+      return;
+    }
+
+    window.location.href = checkoutUrl;
   }
 
   return (
@@ -1086,6 +1160,18 @@ export default function RestaurantsPage() {
                       </div>
                       <div className="team-row-actions">
                         <ReceiptText aria-hidden="true" />
+                        <button
+                          disabled={
+                            payingOrderId === order.id ||
+                            !["KES", "USD"].includes(order.currency)
+                          }
+                          onClick={() => void payOrderWithPaystack(order)}
+                          title="Pay with Paystack"
+                          type="button"
+                        >
+                          <CreditCard aria-hidden="true" />
+                          Pay
+                        </button>
                         {data?.allowedOrderStatuses.length ? (
                           <select
                             aria-label={`Status for order ${order.id}`}

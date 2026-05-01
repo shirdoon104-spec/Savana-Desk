@@ -3,7 +3,10 @@ import { ConfigModule } from "@nestjs/config";
 import { DatabaseModule } from "./database/database.module";
 import { HealthController } from "./health/health.controller";
 import { OnboardingController } from "./onboarding/onboarding.controller";
-import { PaymentsController } from "./payments/payments.controller";
+import {
+  PaymentsController,
+  PaystackWebhookController,
+} from "./payments/payments.controller";
 import { PropertiesController } from "./properties/properties.controller";
 import { RestaurantsController } from "./restaurants/restaurants.controller";
 import { SetupController } from "./setup/setup.controller";
@@ -35,6 +38,7 @@ import { ClerkWebhookService } from "./webhooks/clerk-webhook.service";
     TeamController,
     TenancyController,
     PaymentsController,
+    PaystackWebhookController,
     SyncController,
     ClerkWebhookController,
   ],
