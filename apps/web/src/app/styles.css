@@ -900,6 +900,161 @@ button:hover {
   gap: 6px;
 }
 
+.restaurant-table-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.restaurant-table-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.restaurant-table-card svg {
+  color: var(--accent);
+  height: 22px;
+  width: 22px;
+}
+
+.restaurant-table-card small,
+.restaurant-table-card span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  text-transform: capitalize;
+}
+
+.restaurant-table-card select,
+.restaurant-order-list select {
+  min-height: 36px;
+  text-transform: capitalize;
+}
+
+.restaurant-order-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, 220px) auto;
+}
+
+.restaurant-menu-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  margin-top: 14px;
+}
+
+.restaurant-order-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.restaurant-menu-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.restaurant-order-builder {
+  display: grid;
+  gap: 12px;
+}
+
+.menu-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.menu-item-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.menu-item-card span,
+.menu-item-card small {
+  color: var(--muted);
+}
+
+.order-draft-list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.order-draft-row,
+.order-draft-total {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr auto auto;
+}
+
+.order-draft-total {
+  border-top: 1px solid var(--line);
+  grid-template-columns: 1fr auto;
+  padding-top: 8px;
+}
+
+.restaurant-order-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.kitchen-board {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.kitchen-column {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+}
+
+.kitchen-column-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.kitchen-column-header svg {
+  color: var(--accent);
+  height: 28px;
+  width: 28px;
+}
+
+.kitchen-order small {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  gap: 6px;
+}
+
+.kitchen-order small svg {
+  height: 14px;
+  width: 14px;
+}
+
 .invite-form {
   align-items: end;
   display: grid;
@@ -1075,8 +1230,14 @@ button:hover {
   .choice-grid,
   .field-grid,
   .invite-form,
+  .kitchen-board,
+  .menu-grid,
+  .order-draft-row,
+  .restaurant-menu-form,
   .property-layout,
   .room-grid,
+  .restaurant-table-grid,
+  .restaurant-order-form,
   .room-status-counts,
   .room-filter-row,
   .inventory-form {

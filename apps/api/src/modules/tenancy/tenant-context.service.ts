@@ -152,7 +152,11 @@ export class TenantContextService {
       return null;
     }
 
-    const user = await clerk.users.getUser(clerkUserId);
+    const user = await clerk.users.getUser(clerkUserId).catch(() => null);
+
+    if (!user) {
+      return null;
+    }
     const primaryEmail = user.emailAddresses?.find(
       (email) => email.id === user.primaryEmailAddressId,
     );

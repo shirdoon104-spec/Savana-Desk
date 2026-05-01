@@ -26,13 +26,16 @@ export class ClerkOrganizationResolver {
     }
 
     const clerk = createClerkClient({ secretKey });
-    const memberships =
-      await clerk.organizations.getInstanceOrganizationMembershipList({
+    const membership = await clerk.organizations
+      .getInstanceOrganizationMembershipList({
         limit: 100,
-      });
-    const membership = memberships.data.find(
-      (item) => item.publicUserData?.userId === auth.userId,
-    );
+      })
+      .then((memberships) =>
+        memberships.data.find(
+          (item) => item.publicUserData?.userId === auth.userId,
+        ),
+      )
+      .catch(() => null);
 
     return {
       orgId: membership?.organization.id,

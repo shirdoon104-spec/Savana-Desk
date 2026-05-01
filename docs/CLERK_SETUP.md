@@ -33,10 +33,31 @@ Create `apps/api/.env`:
 DATABASE_URL="postgresql://rayaan:rayaan@localhost:5432/rayaan_hotel"
 REDIS_URL="redis://localhost:6379"
 CLERK_SECRET_KEY="sk_test_..."
+CLERK_WEBHOOK_SIGNING_SECRET="whsec_..."
 WEB_ORIGIN="http://localhost:3000"
 ```
 
-## 4. Restart servers
+## 4. Add the Clerk webhook
+
+In Clerk Dashboard, create an endpoint that points to:
+
+```text
+http://localhost:4000/api/webhooks/clerk
+```
+
+For local testing, expose the API with a tunnel such as ngrok and use the tunnel URL instead of `localhost`. Subscribe to these events:
+
+```text
+organizationInvitation.accepted
+organizationInvitation.revoked
+organizationMembership.created
+organizationMembership.deleted
+user.deleted
+```
+
+Copy the webhook signing secret into `CLERK_WEBHOOK_SIGNING_SECRET`.
+
+## 5. Restart servers
 
 Run these in two PowerShell windows:
 
@@ -48,7 +69,7 @@ pnpm --filter @rayaan/web dev
 pnpm --filter @rayaan/api dev
 ```
 
-## 5. Test the flow
+## 6. Test the flow
 
 1. Open `http://localhost:3000/app`.
 2. Sign up or sign in.

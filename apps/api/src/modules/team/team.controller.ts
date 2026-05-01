@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  InternalServerErrorException,
   Get,
   Param,
   Post,
@@ -55,6 +56,38 @@ function getDisplayName(user: any) {
   return fullName || getPrimaryEmail(user) || user.id;
 }
 
+function uniqueById<T extends { id: string }>(items: T[]) {
+  return Array.from(new Map(items.map((item) => [item.id, item])).values());
+}
+
+function getClerkErrorMessage(error: unknown, fallback: string) {
+  if (!error || typeof error !== "object") {
+    return fallback;
+  }
+
+  const errors = "errors" in error ? error.errors : undefined;
+
+  if (Array.isArray(errors)) {
+    const quotaError = errors.find(
+      (item: any) => item?.code === "organization_membership_quota_exceeded",
+    );
+
+    if (quotaError) {
+      return "This Clerk organization has reached its membership limit. Revoke an unused pending invitation or remove a member, then invite this staff member again.";
+    }
+
+    const clerkMessage = errors
+      .map((item: any) => item?.longMessage ?? item?.message)
+      .find((message: unknown) => typeof message === "string");
+
+    if (clerkMessage) {
+      return clerkMessage;
+    }
+  }
+
+  return fallback;
+}
+
 @Controller("team")
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class TeamController {
@@ -67,6 +100,8 @@ export class TeamController {
   @RequirePermission("staff.read")
   async list(@CurrentTenant() context: TenantContext) {
     const clerk = this.getClerkClient();
+    await this.reconcileAcceptedInvitations(context);
+
     const users = await this.prisma.tenantUser.findMany({
       where: { tenantId: context.tenant.id, status: "active" },
       orderBy: { createdAt: "asc" },
@@ -100,7 +135,7 @@ export class TeamController {
           createdAt: user.createdAt,
         };
       }),
-      invitations: invitations.map((invitation) => ({
+      invitations: uniqueById(invitations).map((invitation) => ({
         id: invitation.id,
         email: invitation.email,
         invitationUrl: invitation.invitationUrl,
@@ -149,15 +184,33 @@ export class TeamController {
         .catch(() => undefined);
     }
 
-    const clerkInvitation =
-      await clerk.organizations.createOrganizationInvitation({
+    const clerkInvitation = await clerk.organizations
+      .createOrganizationInvitation({
         organizationId: context.clerkOrgId,
         emailAddress: email,
         role: role === "owner" || role === "admin" ? "org:admin" : "org:member",
-        inviterUserId: auth.userId,
         privateMetadata: { tenantRole: role },
         publicMetadata: { tenantRole: role },
         redirectUrl,
+      })
+      .catch((error: unknown) => {
+        const status =
+          typeof error === "object" && error && "status" in error
+            ? Number(error.status)
+            : undefined;
+
+        if (status === 400 || status === 403 || status === 404 || status === 422) {
+          throw new BadRequestException(
+            getClerkErrorMessage(
+              error,
+              "Clerk could not create this invitation. Check the email address and organization invitation settings.",
+            ),
+          );
+        }
+
+        throw new InternalServerErrorException(
+          "Clerk invitation service is not available right now.",
+        );
       });
 
     const invitation = await this.prisma.staffInvitation.upsert({
@@ -193,6 +246,53 @@ export class TeamController {
       status: invitation.status,
       createdAt: invitation.createdAt,
       redirectUrl,
+    };
+  }
+
+  @Delete("invitations/:invitationId")
+  @RequirePermission("staff.manage")
+  async revokeInvitation(
+    @CurrentTenant() context: TenantContext,
+    @Param("invitationId") invitationId: string,
+  ) {
+    const invitation = await this.prisma.staffInvitation.findFirst({
+      where: {
+        id: invitationId,
+        status: "pending",
+        tenantId: context.tenant.id,
+      },
+    });
+
+    if (!invitation) {
+      throw new BadRequestException("Pending invitation was not found.");
+    }
+
+    const clerk = this.getClerkClient();
+
+    if (invitation.clerkInvitationId) {
+      await clerk.organizations
+        .revokeOrganizationInvitation({
+          organizationId: context.clerkOrgId,
+          invitationId: invitation.clerkInvitationId,
+        })
+        .catch((error: unknown) => {
+          throw new BadRequestException(
+            getClerkErrorMessage(
+              error,
+              "Clerk could not revoke this invitation. Refresh and try again.",
+            ),
+          );
+        });
+    }
+
+    const revokedInvitation = await this.prisma.staffInvitation.update({
+      where: { id: invitation.id },
+      data: { status: "revoked" },
+    });
+
+    return {
+      id: revokedInvitation.id,
+      status: revokedInvitation.status,
     };
   }
 
@@ -260,5 +360,68 @@ export class TeamController {
 
   private getClerkClient() {
     return this.clerkClients.getClient();
+  }
+
+  private async reconcileAcceptedInvitations(context: TenantContext) {
+    const clerk = this.getClerkClient();
+    const memberships = await clerk.organizations
+      .getOrganizationMembershipList({
+        limit: 100,
+        organizationId: context.clerkOrgId,
+      })
+      .then((response) => response.data)
+      .catch(() => []);
+
+    for (const membership of memberships) {
+      const userId = membership.publicUserData?.userId;
+      const email = membership.publicUserData?.identifier?.toLowerCase();
+
+      if (!userId || !email) {
+        continue;
+      }
+
+      const invitation = await this.prisma.staffInvitation.findUnique({
+        where: {
+          tenantId_email: {
+            email,
+            tenantId: context.tenant.id,
+          },
+        },
+      });
+
+      if (!invitation || invitation.status === "revoked") {
+        continue;
+      }
+
+      await this.prisma.$transaction([
+        this.prisma.staffInvitation.update({
+          where: { id: invitation.id },
+          data: {
+            acceptedByClerkUserId: userId,
+            status: "accepted",
+          },
+        }),
+        this.prisma.tenantUser.upsert({
+          where: {
+            tenantId_clerkUserId: {
+              clerkUserId: userId,
+              tenantId: context.tenant.id,
+            },
+          },
+          create: {
+            clerkUserId: userId,
+            role: invitation.role,
+            status: "active",
+            tenantId: context.tenant.id,
+          },
+          update: {
+            removedAt: null,
+            removedByClerkUserId: null,
+            role: invitation.role,
+            status: "active",
+          },
+        }),
+      ]);
+    }
   }
 }

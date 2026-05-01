@@ -66,21 +66,48 @@ interface TeamResponse {
   }>;
 }
 
+interface WorkspaceContextResponse {
+  user: {
+    clerkUserId: string;
+    role: string | null;
+  };
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+  } | null;
+  tenantResolved: boolean;
+}
+
+function uniqueById<T extends { id: string }>(items: T[]) {
+  return Array.from(new Map(items.map((item) => [item.id, item])).values());
+}
+
 export default function SettingsPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
   const [team, setTeam] = useState<TeamResponse | null>(null);
+  const [workspaceContext, setWorkspaceContext] =
+    useState<WorkspaceContextResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [limitedAccessMessage, setLimitedAccessMessage] = useState<string | null>(
+    null,
+  );
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<StaffRole>("front_desk");
   const [isInviting, setIsInviting] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(
+    null,
+  );
   const [copiedInvitationId, setCopiedInvitationId] = useState<string | null>(
     null,
   );
 
   const staffManagementAllowed = canManageStaff(team?.currentUser.role);
+  const currentRole = team?.currentUser.role ?? workspaceContext?.user.role;
+  const tenantName = team?.tenant.name ?? workspaceContext?.tenant?.name;
 
   async function getOrganizationToken() {
     return getToken(organization ? { organizationId: organization.id } : undefined);
@@ -94,6 +121,7 @@ export default function SettingsPage() {
 
       setLoadState("loading");
       setError(null);
+      setLimitedAccessMessage(null);
 
       const token = await getOrganizationToken();
 
@@ -109,12 +137,44 @@ export default function SettingsPage() {
         });
 
         if (!response.ok) {
+          const message = await readApiMessage(
+            response,
+            "Could not load team access.",
+          );
+
+          if (response.status === 403 && message.includes("staff.read")) {
+            const contextResponse = await fetch(
+              `${process.env.NEXT_PUBLIC_API_URL}/tenancy/context`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              },
+            );
+
+            if (contextResponse.ok) {
+              setWorkspaceContext(
+                (await contextResponse.json()) as WorkspaceContextResponse,
+              );
+            }
+
+            setTeam(null);
+            setLimitedAccessMessage(
+              "Your role does not include team management access.",
+            );
+            setLoadState("ready");
+            return;
+          }
+
           setLoadState("error");
-          setError(await readApiMessage(response, "Could not load team access."));
+          setError(message);
           return;
         }
 
-        setTeam((await response.json()) as TeamResponse);
+        const payload = (await response.json()) as TeamResponse;
+        setTeam({
+          ...payload,
+          invitations: uniqueById(payload.invitations),
+          users: uniqueById(payload.users),
+        });
         setLoadState("ready");
       } catch {
         setLoadState("error");
@@ -160,7 +220,10 @@ export default function SettingsPage() {
     setInviteEmail("");
     setTeam((current) =>
       current
-        ? { ...current, invitations: [payload, ...current.invitations] }
+        ? {
+            ...current,
+            invitations: uniqueById([payload, ...current.invitations]),
+          }
         : current,
     );
   }
@@ -218,6 +281,49 @@ export default function SettingsPage() {
     );
   }
 
+  async function revokeInvitation(
+    invitation: TeamResponse["invitations"][number],
+  ) {
+    setError(null);
+    setRevokingInvitationId(invitation.id);
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setError("Select or create a workspace organization before revoking invitations.");
+      setRevokingInvitationId(null);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/team/invitations/${invitation.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        method: "DELETE",
+      },
+    );
+
+    setRevokingInvitationId(null);
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not revoke invitation."));
+      return;
+    }
+
+    setTeam((current) =>
+      current
+        ? {
+            ...current,
+            invitations: current.invitations.filter(
+              (item) => item.id !== invitation.id,
+            ),
+          }
+        : current,
+    );
+  }
+
   return (
     <div className="settings-grid">
       <section className="notice-panel">
@@ -233,19 +339,22 @@ export default function SettingsPage() {
         <div>
           <p className="eyebrow">Team access</p>
           <h2>
-            {team?.tenant.name ??
+            {tenantName ??
               (loadState === "loading" ? "Loading workspace" : "Workspace access")}
           </h2>
           <p>
             Current role:{" "}
             <strong>
-              {team?.currentUser.role ??
+              {currentRole?.replaceAll("_", " ") ??
                 (loadState === "loading" ? "Loading" : "Not connected")}
             </strong>
           </p>
         </div>
 
         {error ? <div className="form-error">{error}</div> : null}
+        {limitedAccessMessage ? (
+          <div className="empty-state">{limitedAccessMessage}</div>
+        ) : null}
 
         {staffManagementAllowed ? (
           <form className="invite-form" onSubmit={inviteStaff}>
@@ -282,69 +391,92 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <p className="subsection-title">Active members</p>
-        <div className="team-list">
-          {(team?.users ?? []).map((user) => (
-            <div className="team-row" key={user.id}>
-              <div>
-                <strong>{user.name}</strong>
-                {user.email ? <span>{user.email}</span> : null}
-                <span>Joined {new Date(user.createdAt).toLocaleDateString()}</span>
-              </div>
-              <div className="team-row-actions">
-                <span className="role-pill">{user.role.replaceAll("_", " ")}</span>
-                {staffManagementAllowed &&
-                user.clerkUserId !== team?.currentUser.clerkUserId ? (
-                  <button
-                    className="danger-button"
-                    disabled={removingMemberId === user.id}
-                    onClick={() => removeMember(user)}
-                    type="button"
-                  >
-                    {removingMemberId === user.id ? "Removing" : "Remove"}
-                  </button>
-                ) : null}
-              </div>
+        {team ? (
+          <>
+            <p className="subsection-title">Active members</p>
+            <div className="team-list">
+              {team.users.map((user) => (
+                <div className="team-row" key={user.id}>
+                  <div>
+                    <strong>{user.name}</strong>
+                    {user.email ? <span>{user.email}</span> : null}
+                    <span>
+                      Joined {new Date(user.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="team-row-actions">
+                    <span className="role-pill">
+                      {user.role.replaceAll("_", " ")}
+                    </span>
+                    {staffManagementAllowed &&
+                    user.clerkUserId !== team.currentUser.clerkUserId ? (
+                      <button
+                        className="danger-button"
+                        disabled={removingMemberId === user.id}
+                        onClick={() => removeMember(user)}
+                        type="button"
+                      >
+                        {removingMemberId === user.id ? "Removing" : "Remove"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <p className="subsection-title">Pending invitations</p>
-        <div className="team-list">
-          {(team?.invitations ?? []).length ? (
-            team?.invitations.map((invitation) => (
-              <div className="team-row" key={invitation.id}>
-                <div>
-                  <strong>{invitation.email}</strong>
-                  <span>
-                    Invited {new Date(invitation.createdAt).toLocaleDateString()}
-                  </span>
-                </div>
-                <div className="team-row-actions">
-                  <span className="role-pill">
-                    {invitation.role.replaceAll("_", " ")}
-                  </span>
-                  {invitation.invitationUrl ? (
-                    <button
-                      className="secondary-button"
-                      onClick={() =>
-                        copyInvitationLink(
-                          invitation.id,
-                          invitation.invitationUrl as string,
-                        )
-                      }
-                      type="button"
-                    >
-                      {copiedInvitationId === invitation.id ? "Copied" : "Copy link"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="empty-state">No pending invitations.</div>
-          )}
-        </div>
+            <p className="subsection-title">Pending invitations</p>
+            <div className="team-list">
+              {team.invitations.length ? (
+                uniqueById(team.invitations).map((invitation) => (
+                  <div className="team-row" key={invitation.id}>
+                    <div>
+                      <strong>{invitation.email}</strong>
+                      <span>
+                        Invited{" "}
+                        {new Date(invitation.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="team-row-actions">
+                      <span className="role-pill">
+                        {invitation.role.replaceAll("_", " ")}
+                      </span>
+                      {invitation.invitationUrl ? (
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            copyInvitationLink(
+                              invitation.id,
+                              invitation.invitationUrl as string,
+                            )
+                          }
+                          type="button"
+                        >
+                          {copiedInvitationId === invitation.id
+                            ? "Copied"
+                            : "Copy link"}
+                        </button>
+                      ) : null}
+                      {staffManagementAllowed ? (
+                        <button
+                          className="danger-button"
+                          disabled={revokingInvitationId === invitation.id}
+                          onClick={() => revokeInvitation(invitation)}
+                          type="button"
+                        >
+                          {revokingInvitationId === invitation.id
+                            ? "Revoking"
+                            : "Revoke"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state">No pending invitations.</div>
+              )}
+            </div>
+          </>
+        ) : null}
       </section>
     </div>
   );

@@ -11,6 +11,7 @@ import {
 import { Building2 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 function SignedInInviteState() {
   const { user } = useUser();
@@ -38,7 +39,7 @@ function SignedInInviteState() {
   );
 }
 
-export default function AcceptInvitationPage() {
+function AcceptInvitationContent() {
   const searchParams = useSearchParams();
   const clerkStatus = searchParams.get("__clerk_status");
   const shouldSignIn = clerkStatus === "sign_in";
@@ -90,5 +91,13 @@ export default function AcceptInvitationPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+export default function AcceptInvitationPage() {
+  return (
+    <Suspense fallback={null}>
+      <AcceptInvitationContent />
+    </Suspense>
   );
 }

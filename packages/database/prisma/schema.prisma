@@ -84,6 +84,8 @@ model Restaurant {
   name       String
   serviceStyle String?
   property   Property          @relation(fields: [propertyId], references: [id])
+  menuCategories MenuCategory[]
+  menuItems  MenuItem[]
   tables     RestaurantTable[]
   orders     Order[]
   createdAt  DateTime          @default(now())
@@ -173,10 +175,68 @@ model Order {
   totalAmount  Decimal    @default(0)
   currency     String     @default("USD")
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  items        OrderItem[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   @@index([tenantId, propertyId, restaurantId, status])
+}
+
+model MenuCategory {
+  id           String     @id @default(cuid())
+  tenantId     String
+  propertyId   String
+  restaurantId String
+  name         String
+  sortOrder    Int        @default(0)
+  isActive     Boolean    @default(true)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  items        MenuItem[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([tenantId, propertyId, restaurantId, isActive])
+}
+
+model MenuItem {
+  id           String        @id @default(cuid())
+  tenantId     String
+  propertyId   String
+  restaurantId String
+  categoryId   String?
+  name         String
+  description  String?
+  price        Decimal
+  currency     String        @default("USD")
+  isActive     Boolean       @default(true)
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
+  category     MenuCategory? @relation(fields: [categoryId], references: [id])
+  orderItems   OrderItem[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([tenantId, propertyId, restaurantId, isActive])
+  @@index([categoryId])
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  tenantId    String
+  propertyId  String
+  orderId     String
+  menuItemId  String?
+  name        String
+  quantity    Int      @default(1)
+  unitPrice   Decimal
+  totalPrice  Decimal
+  notes       String?
+  order       Order    @relation(fields: [orderId], references: [id])
+  menuItem    MenuItem? @relation(fields: [menuItemId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, propertyId, orderId])
+  @@index([menuItemId])
 }
 
 model Payment {

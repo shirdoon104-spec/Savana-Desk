@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Building2, LayoutDashboard, Settings, Utensils } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { AccountControls } from "./components/account-controls";
+import { AppNav } from "./components/app-nav";
 
 export default function AppLayout({
   children,
@@ -12,24 +13,7 @@ export default function AppLayout({
           <Building2 aria-hidden="true" />
           <span>Rayaan</span>
         </Link>
-        <nav>
-          <Link href="/app">
-            <LayoutDashboard aria-hidden="true" />
-            Dashboard
-          </Link>
-          <Link href="/app/properties">
-            <Building2 aria-hidden="true" />
-            Properties
-          </Link>
-          <Link href="/app/restaurants">
-            <Utensils aria-hidden="true" />
-            Restaurants
-          </Link>
-          <Link href="/app/settings">
-            <Settings aria-hidden="true" />
-            Settings
-          </Link>
-        </nav>
+        <AppNav />
       </aside>
 
       <section className="workspace">
