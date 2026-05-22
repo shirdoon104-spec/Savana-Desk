@@ -62,11 +62,12 @@ interface RestaurantResponse {
       id: string;
       items: Array<{
         categoryId: string | null;
-        currency: string;
-        description: string | null;
-        id: string;
-        name: string;
-        price: number;
+          currency: string;
+          description: string | null;
+          id: string;
+          imageUrl: string | null;
+          name: string;
+          price: number;
       }>;
       name: string;
     }>;
@@ -75,6 +76,7 @@ interface RestaurantResponse {
       currency: string;
       description: string | null;
       id: string;
+      imageUrl: string | null;
       name: string;
       price: number;
     }>;
@@ -141,6 +143,7 @@ export default function RestaurantsPage() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newMenuItemCategoryId, setNewMenuItemCategoryId] = useState("");
   const [newMenuItemDescription, setNewMenuItemDescription] = useState("");
+  const [newMenuItemImageUrl, setNewMenuItemImageUrl] = useState("");
   const [newMenuItemName, setNewMenuItemName] = useState("");
   const [newMenuItemPrice, setNewMenuItemPrice] = useState("");
   const [selectedTableId, setSelectedTableId] = useState("");
@@ -156,6 +159,10 @@ export default function RestaurantsPage() {
   >([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [orderListMode, setOrderListMode] = useState<"active" | "history">(
+    "active",
+  );
 
   const selectedRestaurant = useMemo(
     () =>
@@ -436,6 +443,7 @@ export default function RestaurantsPage() {
         body: JSON.stringify({
           categoryId: newMenuItemCategoryId || undefined,
           description: newMenuItemDescription || undefined,
+          imageUrl: newMenuItemImageUrl || undefined,
           name: newMenuItemName,
           price: Number(newMenuItemPrice),
         }),
@@ -455,6 +463,7 @@ export default function RestaurantsPage() {
     }
 
     setNewMenuItemDescription("");
+    setNewMenuItemImageUrl("");
     setNewMenuItemName("");
     setNewMenuItemPrice("");
     await loadRestaurants();
@@ -631,11 +640,12 @@ export default function RestaurantsPage() {
 
     setPayingOrderId(order.id);
     setError(null);
+    setPaymentError(null);
 
     const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/payments/initiate`, {
       body: JSON.stringify({
         amount: order.totalAmount,
-        currency: "KES",
+        currency: order.currency,
         customerEmail:
           user?.primaryEmailAddress?.emailAddress ??
           `guest-${data.tenant.id}@rayaan.local`,
@@ -657,7 +667,12 @@ export default function RestaurantsPage() {
     setPayingOrderId(null);
 
     if (!response.ok) {
-      setError(await readApiMessage(response, "Could not start Paystack checkout."));
+      const message = await readApiMessage(
+        response,
+        "Could not start Paystack checkout.",
+      );
+      setError(message);
+      setPaymentError(message);
       return;
     }
 
@@ -665,7 +680,9 @@ export default function RestaurantsPage() {
     const checkoutUrl = payment.raw?.authorization_url;
 
     if (!checkoutUrl) {
-      setError("Paystack checkout URL was not returned.");
+      const message = "Paystack checkout URL was not returned.";
+      setError(message);
+      setPaymentError(message);
       return;
     }
 
@@ -998,6 +1015,17 @@ export default function RestaurantsPage() {
                         value={newMenuItemDescription}
                       />
                     </label>
+                    <label>
+                      Image URL
+                      <input
+                        onChange={(event) =>
+                          setNewMenuItemImageUrl(event.target.value)
+                        }
+                        placeholder="https://example.com/dish.jpg"
+                        type="url"
+                        value={newMenuItemImageUrl}
+                      />
+                    </label>
                     <button disabled={isSubmitting} type="submit">
                       <Plus aria-hidden="true" />
                       Add item
@@ -1007,6 +1035,18 @@ export default function RestaurantsPage() {
                   <div className="menu-grid">
                     {selectedRestaurant.menuItems.map((item) => (
                       <div className="menu-item-card" key={item.id}>
+                        {item.imageUrl ? (
+                          <img
+                            alt={item.name}
+                            className="menu-item-image"
+                            loading="lazy"
+                            src={item.imageUrl}
+                          />
+                        ) : (
+                          <div aria-hidden="true" className="menu-item-image-placeholder">
+                            <Utensils />
+                          </div>
+                        )}
                         <strong>{item.name}</strong>
                         <span>
                           {item.currency} {item.price.toFixed(2)}
@@ -1125,115 +1165,165 @@ export default function RestaurantsPage() {
                 ) : null}
 
                 <div className="restaurant-order-list">
-                  <div className="order-section-heading">
-                    <h3>Active orders</h3>
-                    <span>{activeOrders.length}</span>
+                  <div className="order-panel-toolbar">
+                    <div>
+                      <p className="eyebrow">Orders</p>
+                      <h3>
+                        {orderListMode === "active"
+                          ? "Active service"
+                          : "Order history"}
+                      </h3>
+                    </div>
+                    <div
+                      aria-label="Choose which orders to show"
+                      className="segmented-control"
+                      role="group"
+                    >
+                      <button
+                        aria-pressed={orderListMode === "active"}
+                        data-selected={orderListMode === "active"}
+                        onClick={() => setOrderListMode("active")}
+                        type="button"
+                      >
+                        Active
+                        <span>{activeOrders.length}</span>
+                      </button>
+                      <button
+                        aria-pressed={orderListMode === "history"}
+                        data-selected={orderListMode === "history"}
+                        onClick={() => setOrderListMode("history")}
+                        type="button"
+                      >
+                        History
+                        <span>{completedOrders.length}</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {activeOrders.map((order) => (
-                    <div className="team-row" key={order.id}>
-                      <div>
-                        <strong>
-                          {order.currency} {order.totalAmount.toFixed(2)}
-                        </strong>
-                        <span>
-                          {order.tableId
-                            ? selectedRestaurant.tables.find(
-                                (table) => table.id === order.tableId,
-                              )?.name ?? "Table"
-                            : "Counter / takeaway"}
-                        </span>
-                        <span>
-                          {new Date(order.createdAt).toLocaleString()}
-                        </span>
-                        {order.items.map((item) => (
-                          <small key={item.id}>
-                            {item.quantity}x {item.name}
-                            {item.notes ? ` - ${item.notes}` : ""}
-                          </small>
-                        ))}
-                      </div>
-                      <div className="team-row-actions">
-                        <ReceiptText aria-hidden="true" />
-                        <button
-                          disabled={payingOrderId === order.id}
-                          onClick={() => void payOrderWithPaystack(order)}
-                          title="Pay with Paystack"
-                          type="button"
-                        >
-                          <CreditCard aria-hidden="true" />
-                          Pay
-                        </button>
-                        {data?.allowedOrderStatuses.length ? (
-                          <select
-                            aria-label={`Status for order ${order.id}`}
-                            onChange={(event) =>
-                              updateOrderStatus(order.id, event.target.value)
-                            }
-                            value={order.status}
+                  {paymentError ? (
+                    <div aria-live="polite" className="form-error" role="status">
+                      {paymentError}
+                    </div>
+                  ) : null}
+
+                  {orderListMode === "active" ? (
+                    <div className="order-compact-list">
+                      {activeOrders.map((order) => {
+                        const tableName = order.tableId
+                          ? selectedRestaurant.tables.find(
+                              (table) => table.id === order.tableId,
+                            )?.name ?? "Table"
+                          : "Counter / takeaway";
+
+                        return (
+                          <article className="order-compact-row" key={order.id}>
+                            <div className="order-compact-main">
+                              <strong>
+                                {order.currency} {order.totalAmount.toFixed(2)}
+                              </strong>
+                              <span>{tableName}</span>
+                              <small>
+                                {order.items.length} item
+                                {order.items.length === 1 ? "" : "s"} -{" "}
+                                {new Date(order.createdAt).toLocaleTimeString()}
+                              </small>
+                            </div>
+                            <div className="order-compact-items">
+                              {order.items.slice(0, 2).map((item) => (
+                                <span key={item.id}>
+                                  {item.quantity}x {item.name}
+                                </span>
+                              ))}
+                              {order.items.length > 2 ? (
+                                <span>+{order.items.length - 2} more</span>
+                              ) : null}
+                            </div>
+                            <div className="order-compact-actions">
+                              <button
+                                aria-label={`Pay order for ${tableName}`}
+                                disabled={payingOrderId === order.id}
+                                onClick={() => void payOrderWithPaystack(order)}
+                                type="button"
+                              >
+                                <CreditCard aria-hidden="true" />
+                                {payingOrderId === order.id ? "Starting" : "Pay"}
+                              </button>
+                              {data?.allowedOrderStatuses.length ? (
+                                <label>
+                                  <span className="sr-only">
+                                    Status for order {order.id}
+                                  </span>
+                                  <select
+                                    aria-label={`Status for order ${order.id}`}
+                                    onChange={(event) =>
+                                      updateOrderStatus(order.id, event.target.value)
+                                    }
+                                    value={order.status}
+                                  >
+                                    {data.allowedOrderStatuses.includes(order.status)
+                                      ? null
+                                      : (
+                                          <option value={order.status}>
+                                            {formatLabel(order.status)}
+                                          </option>
+                                        )}
+                                    {data.allowedOrderStatuses.map((status) => (
+                                      <option key={status} value={status}>
+                                        {formatLabel(status)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ) : (
+                                <span className="role-pill">
+                                  {formatLabel(order.status)}
+                                </span>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+
+                      {!activeOrders.length ? (
+                        <div className="empty-state">No active orders.</div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="order-history-list">
+                      {completedOrders.map((order) => {
+                        const tableName = order.tableId
+                          ? selectedRestaurant.tables.find(
+                              (table) => table.id === order.tableId,
+                            )?.name ?? "Table"
+                          : "Counter / takeaway";
+
+                        return (
+                          <article
+                            className="order-history-row"
+                            key={order.id}
                           >
-                            {data.allowedOrderStatuses.includes(order.status)
-                              ? null
-                              : (
-                                  <option value={order.status}>
-                                    {formatLabel(order.status)}
-                                  </option>
-                                )}
-                            {data.allowedOrderStatuses.map((status) => (
-                              <option key={status} value={status}>
-                                {formatLabel(status)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="role-pill">
-                            {formatLabel(order.status)}
-                          </span>
-                        )}
-                      </div>
+                            <ReceiptText aria-hidden="true" />
+                            <div>
+                              <strong>
+                                {order.currency} {order.totalAmount.toFixed(2)}
+                              </strong>
+                              <span>
+                                {tableName} -{" "}
+                                {new Date(order.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            <span className="role-pill">
+                              {formatLabel(order.status)}
+                            </span>
+                          </article>
+                        );
+                      })}
+
+                      {!completedOrders.length ? (
+                        <div className="empty-state">No completed orders yet.</div>
+                      ) : null}
                     </div>
-                  ))}
-
-                  {!activeOrders.length ? (
-                    <div className="empty-state">No active orders.</div>
-                  ) : null}
-
-                  <div className="order-section-heading">
-                    <h3>Completed orders</h3>
-                    <span>{completedOrders.length}</span>
-                  </div>
-
-                  {completedOrders.map((order) => (
-                    <div className="team-row order-history-row" key={order.id}>
-                      <div>
-                        <strong>
-                          {order.currency} {order.totalAmount.toFixed(2)}
-                        </strong>
-                        <span>
-                          {order.tableId
-                            ? selectedRestaurant.tables.find(
-                                (table) => table.id === order.tableId,
-                              )?.name ?? "Table"
-                            : "Counter / takeaway"}
-                        </span>
-                        <span>{new Date(order.createdAt).toLocaleString()}</span>
-                        {order.items.map((item) => (
-                          <small key={item.id}>
-                            {item.quantity}x {item.name}
-                            {item.notes ? ` - ${item.notes}` : ""}
-                          </small>
-                        ))}
-                      </div>
-                      <div className="team-row-actions">
-                        <ReceiptText aria-hidden="true" />
-                        <span className="role-pill">{formatLabel(order.status)}</span>
-                      </div>
-                    </div>
-                  ))}
-
-                  {!completedOrders.length ? (
-                    <div className="empty-state">No completed orders yet.</div>
-                  ) : null}
+                  )}
                 </div>
               </section>
 

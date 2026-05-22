@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useOrganization } from "@clerk/nextjs";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -24,6 +24,7 @@ async function readApiMessage(response: Response, fallback: string) {
 
 function PaystackCallbackContent() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { organization } = useOrganization();
   const searchParams = useSearchParams();
   const reference = searchParams.get("reference");
   const [message, setMessage] = useState("Confirming payment with Paystack.");
@@ -48,11 +49,13 @@ function PaystackCallbackContent() {
       }
 
       setVerifyState("verifying");
-      const token = await getToken();
+      const token = await getToken(
+        organization ? { organizationId: organization.id } : undefined,
+      );
 
       if (!token) {
         setVerifyState("error");
-        setMessage("Could not confirm your workspace session.");
+        setMessage("Select your workspace again to confirm this payment.");
         return;
       }
 
@@ -82,7 +85,7 @@ function PaystackCallbackContent() {
     }
 
     void verifyPayment();
-  }, [getToken, isLoaded, isSignedIn, reference, verifyState]);
+  }, [getToken, isLoaded, isSignedIn, organization, reference, verifyState]);
 
   return (
     <main className="app-shell">

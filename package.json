@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "description": "Offline-first multi-tenant hotel and restaurant management SaaS.",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm dev:services && pnpm -r --parallel dev",
+    "dev:services": "docker compose -f infra/docker-compose.dev.yml up -d",
     "dev:web": "pnpm --filter @rayaan/web dev",
     "dev:api": "pnpm --filter @rayaan/api dev",
     "build": "pnpm -r build",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useOrganization } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 
 interface TenantContext {
@@ -21,6 +21,7 @@ interface TenantContext {
 
 export function TenantSummary() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { organization } = useOrganization();
   const [context, setContext] = useState<TenantContext | null>(null);
 
   useEffect(() => {
@@ -29,7 +30,9 @@ export function TenantSummary() {
         return;
       }
 
-      const token = await getToken();
+      const token = await getToken(
+        organization ? { organizationId: organization.id } : undefined,
+      );
 
       if (!token) {
         return;
@@ -48,7 +51,7 @@ export function TenantSummary() {
     }
 
     void loadTenantContext();
-  }, [getToken, isLoaded, isSignedIn]);
+  }, [getToken, isLoaded, isSignedIn, organization]);
 
   if (!context?.tenantResolved || !context.tenant) {
     return (

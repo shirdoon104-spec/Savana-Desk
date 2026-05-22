@@ -16,6 +16,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   MaxLength,
   Min,
   MinLength,
@@ -100,6 +101,11 @@ class CreateMenuItemDto {
   @IsString()
   @MaxLength(240)
   description?: string;
+
+  @IsOptional()
+  @IsUrl({ require_protocol: true })
+  @MaxLength(500)
+  imageUrl?: string;
 
   @IsString()
   @MinLength(1)
@@ -359,10 +365,11 @@ export class RestaurantsController {
             categoryId: item.categoryId,
             currency: item.currency,
             description: item.description,
-            id: item.id,
-            name: item.name,
-            price: Number(item.price),
-          })),
+              id: item.id,
+              imageUrl: item.imageUrl,
+              name: item.name,
+              price: Number(item.price),
+            })),
           name: category.name,
         })),
         menuItems: restaurant.menuItems.map((item) => ({
@@ -370,6 +377,7 @@ export class RestaurantsController {
           currency: item.currency,
           description: item.description,
           id: item.id,
+          imageUrl: item.imageUrl,
           name: item.name,
           price: Number(item.price),
         })),
@@ -420,6 +428,7 @@ export class RestaurantsController {
     currency: string;
     description: string | null;
     id: string;
+    imageUrl: string | null;
     name: string;
     price: number;
   }> {
@@ -441,6 +450,7 @@ export class RestaurantsController {
         categoryId: body.categoryId || null,
         currency: restaurant.property.currency,
         description: body.description?.trim() || null,
+        imageUrl: body.imageUrl?.trim() || null,
         name: body.name.trim(),
         price: body.price,
         propertyId: restaurant.propertyId,
@@ -454,6 +464,7 @@ export class RestaurantsController {
       currency: menuItem.currency,
       description: menuItem.description,
       id: menuItem.id,
+      imageUrl: menuItem.imageUrl,
       name: menuItem.name,
       price: Number(menuItem.price),
     };

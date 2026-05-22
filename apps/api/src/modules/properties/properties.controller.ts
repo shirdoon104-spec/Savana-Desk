@@ -244,7 +244,7 @@ export class PropertiesController {
       throw new BadRequestException("Property name is required.");
     }
 
-    if (!["USD", "SOS"].includes(currency)) {
+    if (!["KES", "USD", "SOS"].includes(currency)) {
       throw new BadRequestException("Choose a supported currency.");
     }
 

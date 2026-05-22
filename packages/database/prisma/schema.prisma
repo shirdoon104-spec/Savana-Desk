@@ -210,6 +210,7 @@ model MenuItem {
   categoryId   String?
   name         String
   description  String?
+  imageUrl     String?
   price        Decimal
   currency     String        @default("USD")
   isActive     Boolean       @default(true)

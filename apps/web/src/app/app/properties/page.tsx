@@ -516,7 +516,7 @@ export default function PropertiesPage() {
 
                 <div className="room-grid">
                   {filteredRooms.map((room) => (
-                    <div className="room-card" key={room.id}>
+                    <div className="room-card" data-status={room.status} key={room.id}>
                       <DoorOpen aria-hidden="true" />
                       <strong>{room.number}</strong>
                       <span>{room.type}</span>
@@ -725,6 +725,7 @@ export default function PropertiesPage() {
                 value={currency}
               >
                 <option value="USD">USD</option>
+                <option value="KES">KES</option>
                 <option value="SOS">SOS</option>
               </select>
             </label>

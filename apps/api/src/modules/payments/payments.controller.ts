@@ -31,7 +31,7 @@ import {
   type PaymentRequest,
   type PaymentResult,
 } from "@rayaan/payments";
-import { paymentProviders } from "@rayaan/shared";
+import { hasTenantPermission, paymentProviders, type TenantRole } from "@rayaan/shared";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { CurrentTenant } from "../auth/current-tenant.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
@@ -99,7 +99,7 @@ export class PaymentsController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Post("initiate")
-  @RequirePermission("billing.manage")
+  @RequirePermission("billing.read")
   async initiate(
     @CurrentTenant() context: TenantContext,
     @Body() request: InitiatePaymentDto,
@@ -122,6 +122,12 @@ export class PaymentsController {
 
     if (!Number.isFinite(request.amount) || request.amount <= 0) {
       throw new BadRequestException("Payment amount must be greater than zero.");
+    }
+
+    if (request.orderId) {
+      await this.validateRestaurantOrderPayment(context, request);
+    } else if (!hasTenantPermission(context.role, "billing.manage")) {
+      throw new BadRequestException("Your role cannot initiate this payment.");
     }
 
     const existingPayment = await this.prisma.payment.findUnique({
@@ -177,7 +183,7 @@ export class PaymentsController {
   }
 
   @Get("paystack/verify/:reference")
-  @RequirePermission("billing.manage")
+  @RequirePermission("billing.read")
   async verifyPaystack(
     @CurrentTenant() context: TenantContext,
     @Param("reference") reference: string,
@@ -265,6 +271,59 @@ export class PaymentsController {
       secretKey,
     });
   }
+
+  private async validateRestaurantOrderPayment(
+    context: TenantContext,
+    request: InitiatePaymentDto,
+  ) {
+    if (!canTakeRestaurantPayment(context.role)) {
+      throw new BadRequestException("Your role cannot take restaurant payments.");
+    }
+
+    if (!request.restaurantId) {
+      throw new BadRequestException("Restaurant order payments require a restaurant.");
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where: {
+        id: request.orderId,
+        propertyId: request.propertyId,
+        restaurantId: request.restaurantId,
+        tenantId: context.tenant.id,
+      },
+    });
+
+    if (!order) {
+      throw new BadRequestException("Order was not found for this restaurant.");
+    }
+
+    if (["closed", "cancelled"].includes(order.status)) {
+      throw new BadRequestException("This order is already final.");
+    }
+
+    if (order.currency !== request.currency) {
+      throw new BadRequestException("Payment currency does not match the order.");
+    }
+
+    if (toSubunitAmount(Number(order.totalAmount)) !== toSubunitAmount(request.amount)) {
+      throw new BadRequestException("Payment amount does not match the order.");
+    }
+  }
+}
+
+function toSubunitAmount(amount: number) {
+  return Math.round(amount * 100);
+}
+
+function canTakeRestaurantPayment(role: TenantRole) {
+  return [
+    "owner",
+    "admin",
+    "restaurant_manager",
+    "waiter",
+    "accountant",
+    "front_desk",
+  ].includes(role);
 }
 
 interface PaystackWebhookRequest extends Request {
