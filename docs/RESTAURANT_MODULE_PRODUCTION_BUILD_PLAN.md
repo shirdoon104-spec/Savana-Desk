@@ -1,6 +1,6 @@
 # Restaurant Module Production Build Plan
 
-Last reviewed: 2026-05-22
+Last reviewed: 2026-05-25
 
 This plan is the implementation source of truth for hardening and completing the restaurant module. Work through phases in order. Do not build UI or operational features until the security and schema phases are complete.
 
@@ -14,8 +14,8 @@ Important local alignment notes:
 
 - There is no `Staff` model today. Fields described as `waiterId`, `closedById`, `appliedById`, `approvedById`, `recordedById`, and similar actor fields should initially reference `TenantUser.id` or store the Clerk user id consistently. Add a dedicated `Staff` model only if the wider app needs employee profiles separate from tenancy membership.
 - The current generic `Payment` model can remain for provider checkout sessions, but restaurant settlement needs the new append-only `OrderPayment` ledger. Do not rely on the existing single `Payment` row as the source of truth for closing restaurant orders.
-- Paystack returns transaction amounts in the smallest currency subunit. Compare `order.totalAmount * 100` to Paystack `amount` for currencies with two decimal minor units. If a zero-decimal currency is ever supported, use a currency minor-unit helper rather than hard-coding `* 100`.
-- Paystack webhook requests are public machine-to-machine calls, not authenticated tenant requests. Validate `metadata.tenantId` against the stored `Payment`, `Order`, `Restaurant`, and verified Paystack transaction metadata.
+- Paystack returns transaction amounts in the smallest currency subunit. Compare with `Decimal`, never with JavaScript floating-point equality. Convert using a currency minor-unit helper, for example `new Decimal(verified.amount).div(10 ** currencyExponent).equals(order.totalAmount)`.
+- Paystack webhook requests are public machine-to-machine calls, not authenticated tenant requests. Use the provider reference to find the stored payment/order, then compare verified transaction metadata against the stored tenant, property, restaurant, and order ids.
 
 ## Fact-Checked Security Notes
 
@@ -60,6 +60,8 @@ For production, restaurant tax/service/discount settings should move to tenant, 
 
 Complete these before adding new restaurant features.
 
+Status as of 2026-05-25: implemented in code. Paystack fulfillment now validates provider verification, scope metadata, amount, currency, and duplicate ledger entries before closing an order. Order creation accepts `Idempotency-Key` and body `idempotencyKey`, returns the existing order for duplicate keys, and keeps older clients compatible by generating a server key when none is supplied.
+
 ### Task 0.1 - Harden Paystack Webhook Verification
 
 Problem: Orders can be closed from provider events without enough scope and duplicate fulfillment checks.
@@ -67,17 +69,31 @@ Problem: Orders can be closed from provider events without enough scope and dupl
 Required checks before confirming payment or closing an order:
 
 - Verify `x-paystack-signature` using HMAC SHA512 over the raw request body.
-- Re-fetch the transaction via Paystack `GET /transaction/verify/:reference`.
+- Extract `reference` from the signed webhook payload and use it to fetch the stored Paystack checkout/payment record and linked order from the database.
+- Re-fetch the transaction via Paystack `GET /transaction/verify/:reference`; do not trust webhook payload fields for fulfillment decisions.
 - Require verified transaction `status = success`.
-- Verify verified Paystack `amount` matches the expected order or payment amount exactly in minor units.
+- Verify verified Paystack `amount` matches the expected order or payment amount using `Decimal` and the currency minor-unit exponent.
 - Verify verified Paystack `currency` matches the order/property currency.
-- Verify verified metadata `orderId` matches the order being closed.
-- Verify verified metadata `tenantId` matches the stored payment and order tenant.
-- Verify verified metadata `restaurantId` matches the order restaurant.
-- Verify verified metadata `propertyId` matches the order property.
+- Verify verified metadata `orderId` equals the stored order id.
+- Verify verified metadata `tenantId` equals the stored order and payment tenant id.
+- Verify verified metadata `restaurantId` equals the stored order restaurant id.
+- Verify verified metadata `propertyId` equals the stored order property id.
 - Check for duplicate `reference` before fulfillment. If an `OrderPayment` with the same Paystack reference is already confirmed, return success to Paystack but log `duplicate` and do not close again.
 - Log every webhook attempt, including invalid signature attempts where possible.
 - Return a 2xx response for already-processed duplicate valid webhooks to avoid unnecessary provider retries.
+
+Recommended amount comparison shape:
+
+```ts
+const exponent = currencyMinorUnitExponent(verifiedTransaction.currency);
+const verifiedAmount = new Decimal(verifiedTransaction.amount).div(
+  new Decimal(10).pow(exponent),
+);
+
+if (!verifiedAmount.equals(order.totalAmount)) {
+  reject("Verified Paystack amount does not match the order total.");
+}
+```
 
 New model:
 

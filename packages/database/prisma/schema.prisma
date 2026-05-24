@@ -178,12 +178,15 @@ model Order {
   status       String     @default("draft")
   totalAmount  Decimal    @default(0)
   currency     String     @default("USD")
+  idempotencyKey String?
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
   items        OrderItem[]
+  payments     OrderPayment[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   @@index([tenantId, propertyId, restaurantId, status])
+  @@unique([tenantId, idempotencyKey])
 }
 
 model MenuCategory {
@@ -266,6 +269,71 @@ model Payment {
 
   @@index([tenantId, propertyId, status])
   @@index([provider, providerTransactionId])
+}
+
+model PaymentWebhookLog {
+  id              String                @id @default(cuid())
+  provider        String
+  reference       String?
+  tenantId        String?
+  propertyId      String?
+  restaurantId    String?
+  orderId         String?
+  payload         Json
+  verifiedAt      DateTime?
+  outcome         PaymentWebhookOutcome
+  rejectionReason String?
+  createdAt       DateTime              @default(now())
+
+  @@index([provider, reference])
+  @@index([tenantId, createdAt])
+}
+
+enum PaymentWebhookOutcome {
+  success
+  rejected
+  duplicate
+}
+
+model OrderPayment {
+  id           String                   @id @default(cuid())
+  tenantId     String
+  propertyId   String
+  restaurantId String
+  orderId      String
+  method       OrderPaymentMethod
+  amount       Decimal
+  currency     String
+  reference    String?
+  status       OrderPaymentLedgerStatus @default(pending)
+  paidAt       DateTime?
+  recordedById String?
+  refundedAt   DateTime?
+  refundedById String?
+  refundReason String?
+  metadata     Json?
+  createdAt    DateTime                 @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@unique([tenantId, method, reference])
+  @@index([tenantId, orderId, status])
+}
+
+enum OrderPaymentMethod {
+  paystack
+  cash
+  card_manual
+  room_charge
+  complimentary
+  voucher
+}
+
+enum OrderPaymentLedgerStatus {
+  pending
+  confirmed
+  failed
+  refunded
 }
 
 model OfflineAction {

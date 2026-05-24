@@ -554,16 +554,19 @@ export default function RestaurantsPage() {
       return;
     }
 
+    const idempotencyKey = crypto.randomUUID();
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/orders`,
       {
         body: JSON.stringify({
+          idempotencyKey,
           items: orderItems,
           tableId: orderTableId || undefined,
         }),
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
         },
         method: "POST",
       },

@@ -3,11 +3,13 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
   UseGuards,
 } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { Type } from "class-transformer";
 import {
   IsArray,
@@ -162,6 +164,11 @@ class UpdateTableDto {
 }
 
 class CreateOrderDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  idempotencyKey?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(128)
@@ -599,6 +606,7 @@ export class RestaurantsController {
   async createOrder(
     @CurrentTenant() context: TenantContext,
     @Param("restaurantId") restaurantId: string,
+    @Headers("idempotency-key") idempotencyKeyHeader: string | undefined,
     @Body() body: CreateOrderDto,
   ) {
     if (!canCreateOrder(context.role)) {
@@ -616,6 +624,22 @@ export class RestaurantsController {
 
     if (!body.items?.length && body.totalAmount === undefined) {
       throw new BadRequestException("Add menu items or enter an order total.");
+    }
+
+    const idempotencyKey = resolveOrderIdempotencyKey(
+      idempotencyKeyHeader,
+      body.idempotencyKey,
+    );
+    const existingOrder = await this.prisma.order.findFirst({
+      where: {
+        idempotencyKey,
+        tenantId: context.tenant.id,
+      },
+      include: { items: true },
+    });
+
+    if (existingOrder) {
+      return serializeOrder(existingOrder);
     }
 
     const orderItems = body.items?.length
@@ -674,6 +698,7 @@ export class RestaurantsController {
           tableId: body.tableId || null,
           tenantId: context.tenant.id,
           totalAmount,
+          idempotencyKey,
         },
         include: { items: true },
       });
@@ -922,4 +947,24 @@ export class RestaurantsController {
 
     return null;
   }
+}
+
+function resolveOrderIdempotencyKey(headerValue?: string, bodyValue?: string) {
+  const idempotencyKey = headerValue?.trim() || bodyValue?.trim();
+
+  if (!idempotencyKey) {
+    return randomUUID();
+  }
+
+  if (!isUuid(idempotencyKey)) {
+    throw new BadRequestException("Order idempotency key must be a UUID.");
+  }
+
+  return idempotencyKey;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }

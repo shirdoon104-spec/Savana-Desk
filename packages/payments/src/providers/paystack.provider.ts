@@ -24,6 +24,7 @@ interface PaystackVerifyResponse {
     amount?: number;
     currency?: string;
     gateway_response?: string;
+    metadata?: unknown;
     reference?: string;
     status?: string;
   };
