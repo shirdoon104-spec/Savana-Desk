@@ -364,15 +364,40 @@ export default function PropertiesPage() {
       return;
     }
 
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/check-out`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
+    const postCheckout = (acknowledgeRestaurantCharges: boolean) =>
+      fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/check-out`,
+        {
+          body: acknowledgeRestaurantCharges
+            ? JSON.stringify({ acknowledgeRestaurantCharges })
+            : undefined,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(acknowledgeRestaurantCharges
+              ? { "Content-Type": "application/json" }
+              : {}),
+          },
+          method: "POST",
         },
-        method: "POST",
-      },
-    );
+      );
+
+    let response = await postCheckout(false);
+
+    if (!response.ok) {
+      const message = await readApiMessage(response, "Could not check out guest.");
+
+      if (
+        response.status === 400 &&
+        message.startsWith("Review ") &&
+        window.confirm(message)
+      ) {
+        response = await postCheckout(true);
+      } else {
+        setError(message);
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     setIsSubmitting(false);
 

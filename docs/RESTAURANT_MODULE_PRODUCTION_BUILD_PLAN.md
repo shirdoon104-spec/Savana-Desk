@@ -150,6 +150,8 @@ API rules:
 
 Do schema first, then API, then UI. Add migrations before endpoint behavior.
 
+Status as of 2026-05-25: schema migration started and applied locally. Tasks 1.1, 1.2, 1.3, and 1.5 have database support in place with backward-compatible defaults/nullability. Task 1.4 was introduced in Phase 0 for Paystack settlement. Order creation now records server-calculated subtotal/tax/service/discount snapshots, initializes item workflow status, and writes `order_created` audit logs. Existing status and payment flows now write audit logs and keep item/payment status snapshots aligned. Rich lifecycle endpoints, discount APIs, manager approval rules, and UI changes remain for later Phase 1/Phase 2 work.
+
 ### Task 1.1 - Upgrade `Order`
 
 Add fields:
@@ -328,6 +330,8 @@ Events:
 
 Every endpoint must enforce tenant scope, role permissions, server-side recalculation, and audit logging.
 
+Status as of 2026-05-25: Task 2.1 backend item management endpoints are implemented under the tenant-scoped restaurant routes. Add/update/remove/void item actions enforce mutable order state, role permissions, item status rules, server-side recalculation, and audit logging. Task 2.2 core backend bill actions are partially implemented: fire course, apply discount, record manual payment, close, cancel, and transfer table. Split billing and room-charge folio posting remain.
+
 ### Task 2.1 - Item Management Endpoints
 
 - `POST /orders/:id/items` - Add items after order is placed. Waiter/cashier/manager.
@@ -380,6 +384,8 @@ Calculation order:
 5. Round consistently at the currency minor-unit boundary.
 
 ## Phase 3 - Charge to Room
+
+Status as of 2026-05-25: initial backend room-charge flow is implemented. `GET /stays/active` searches active in-house stays for POS use, and `POST /folios/:folioId/charges` posts the remaining restaurant order balance to the active stay, creates a `FolioCharge`, creates a confirmed `room_charge` `OrderPayment`, closes the order, updates the table to cleaning, and writes audit logs. This uses `Stay.id` as the current folio identifier until a dedicated `Folio` model is introduced. Checkout now requires staff acknowledgement when posted restaurant folio charges are present. `GET /reports/restaurant-room-charges` and `GET /reports/restaurant-room-charges.csv` provide the daily room-charge reconciliation report and CSV export.
 
 ### Task 3.1 - Guest Lookup from POS
 
@@ -445,6 +451,8 @@ Daily report:
 
 ## Phase 4 - Kitchen Display System
 
+Status as of 2026-05-25: Task 4.1, the first Task 4.2 slice, the SSE foundation for Task 4.3, and browser-based Task 4.4 ticket printing are implemented. The schema now includes `KitchenStation`, menu category default station routing, and menu item station overrides. Order creation and item add flows assign a kitchen station. The kitchen board renders operational kitchen tickets grouped by station, order, and course, while still tracking item-level statuses underneath. Tickets show all items, modifiers/notes, elapsed time, amber/red delay borders, and batch Start/Ready actions that update the ticket's items from `sent` to `preparing` to `ready`. `GET /events/kitchen/:restaurantId` streams tenant-scoped kitchen events, and the kitchen page subscribes with auto-reconnecting `EventSource`. Each kitchen ticket can now generate print-ready browser HTML with ticket number, timestamp, table, covers, course, station, items, modifiers, and notes. ESC/POS or print-server integration remains future work.
+
 ### Task 4.1 - Kitchen Stations Config
 
 Add `KitchenStation`:
@@ -507,6 +515,8 @@ On item fire:
 
 Redesign as an operational POS, not an admin panel.
 
+Status as of 2026-05-25: Task 5.1 has its first UI slice implemented on the restaurant page. The restaurant screen now opens with a POS-oriented floor map, status legend, color-coded table tiles, covers, waiter assignment, active bill amount, and elapsed order duration. Tapping a table continues to open the existing order/table panel without changing current order functionality. Task 5.2 has its first UI slice implemented with category tabs, menu search, touch-friendly menu tiles, quantity steppers, a current ticket panel, and a bottom total sourced from the existing draft payload. Task 5.3 has its first UI slice implemented with a payment drawer for active orders, outstanding/paid totals, method selection, equal split and item split amount helpers, cash change calculation, manual payment recording, hosted Paystack checkout, active-stay room-charge posting, and browser receipt printing after full manual or room-charge settlement. Task 5.4 has its first UI slice implemented with manager-only order actions for discounts, item voids, table transfers, cancellations, and browser receipt reprints. Seat-level split and manager PIN or re-authentication remain.
+
 ### Task 5.1 - Floor Map Default Screen
 
 - Landing screen for waiter/cashier roles.
@@ -544,6 +554,8 @@ Redesign as an operational POS, not an admin panel.
 ### Task 6.1 - Client-Side Action Queue
 
 Use IndexedDB for offline order mutations.
+
+Status as of 2026-05-26: first slice implemented. The POS restaurant page now shows online/offline state and queued action count, stores a stable local device id, and queues order creation in IndexedDB when offline or when the network drops during submit. When the browser is online, it flushes queued actions to `/sync/actions` in order-preserving batches and marks local rows as synced or failed. The sync endpoint now persists validated `OfflineAction` rows idempotently, replays supported `order.create` actions into real orders using server-side menu pricing, totals, audit logs, and table status updates, applies retry caps from `OFFLINE_QUEUE_MAX_RETRIES`, and persists terminal conflict/rejection reasons for manager review. Conflict rules now cover occupied-table order creation, payments against final or changed-balance orders, duplicate item voids as no-ops, and table transfers to occupied tables. A shared 24-hour `IdempotencyRecord` response store now caches duplicate `POST`, `PATCH`, and `DELETE` requests carrying `Idempotency-Key` after tenant resolution, rejects key reuse with different route/body/params/query data, and the POS UI sends keys for live payment, room-charge, status, and manager mutations. Manager review endpoints and a POS review panel now list conflicted/rejected offline actions and allow managers to mark them reviewed.
 
 Queue entry:
 
@@ -592,9 +604,13 @@ Critical endpoints:
 - Folio charge
 - Close bill
 
+Status as of 2026-05-26: implemented as a global API interceptor for authenticated tenant-scoped mutations that include `Idempotency-Key`. Duplicate exact requests return the stored response for 24 hours; mismatched reuse is rejected.
+
 ## Phase 7 - Reporting and Reconciliation
 
 ### Task 7.1 - End-of-Day Z-Report
+
+Status as of 2026-05-26: first backend and UI slice implemented. `GET /reports/restaurant-z-report` and `GET /reports/restaurant-z-report.csv` return date-range, property, and restaurant filtered summaries for closed orders, including order count, covers, gross and confirmed revenue, tax, service charge, discounts, revenue by payment method, top items, void reasons, average order value, and average covers per table. The manager POS screen links to JSON and CSV exports for the selected restaurant and business date.
 
 Fields:
 
@@ -610,11 +626,15 @@ Fields:
 
 ### Task 7.2 - Shift Report
 
+Status as of 2026-05-26: first backend and UI slice implemented. `GET /reports/restaurant-shift-report` and `GET /reports/restaurant-shift-report.csv` aggregate closed restaurant orders by waiter/actor for the selected date, property, and restaurant, including orders handled, covers, net sales, payments collected, payment variance, and average order value. The manager POS report panel can switch between Z-report and shift report. This is actor-grouped reporting from existing audit/order fields; formal shift start/end records remain future work.
+
 - Per-waiter orders handled, total value, and tips if supported.
 - Opens at shift start and closes at shift end.
 - Linked to audit logs.
 
 ### Task 7.3 - Live Manager Dashboard
+
+Status as of 2026-05-26: first backend and UI slice implemented. `GET /reports/restaurant-live-dashboard` returns open order count/value/outstanding value, active table count and covers in-house, confirmed room-charge totals, KDS station queue depth, and average prep minutes by course where timestamps exist. The manager POS screen now shows a refreshable live dashboard for the selected restaurant.
 
 - Open orders count and value.
 - Covers in-house.
@@ -626,6 +646,8 @@ Fields:
 
 ### Task 8.1 - Allergen and Dietary Flags
 
+Status as of 2026-05-28: first slice implemented. `MenuItem` now stores allergen and dietary flag arrays with a reviewed migration, the restaurant API accepts and returns those flags, POS menu management can assign them, POS menu tiles display compact badges, and KDS tickets show dietary details plus prominent allergen warnings in the browser print ticket.
+
 Add to `MenuItem`:
 
 - `allergens`: nuts, gluten, dairy, eggs, shellfish, soy.
@@ -635,12 +657,16 @@ Display flags on POS and customer menu. Print allergen warnings prominently on k
 
 ### Task 8.2 - QR Code Table Ordering
 
+Status as of 2026-05-28: first slice implemented. Tables now get stable `/menu/:restaurantId/:tableId` QR links, the POS table panel exposes the public menu link, `GET /public/menu/:restaurantId/:tableId` serves an unauthenticated guest menu with allergen/dietary flags, and `POST /public/menu/:restaurantId/:tableId/orders` creates a draft/pending table order for staff confirmation without firing kitchen tickets. The public `/menu/:restaurantId/:tableId` page lets guests browse categories, build a cart, and submit the order for waiter confirmation. POS now labels draft QR orders as guest submissions, shows the full item list for waiter/manager verification, blocks settlement until confirmation, and provides a clear `Confirm & send` action that moves the order into the normal sent/kitchen flow.
+
 - Each table has a unique QR link to `/menu/:restaurantId/:tableId`.
 - Guest menu supports browsing and order submission.
 - Submitted guest orders stay pending until waiter confirmation.
 - Waiter can confirm or reject before firing to kitchen.
 
 ### Task 8.3 - Reservation and Waitlist
+
+Status as of 2026-05-28: first slice implemented. The database now has a `Reservation` model with confirmed, waitlisted, seated, cancelled, and no-show states plus `ReservationItem` rows for optional pre-order/requested menu items. The restaurant API returns active reservations with table suggestions and requested items, supports creating reservations/waitlist entries with menu selections, and lets restaurant managers update status/table assignments while keeping table status aligned. The POS floor map now includes a booking and waitlist panel with a modal booking form for guest name, party size, time, optional table, notes, requested items, suggested tables, seating, and status changes. Guest self-reservation can reuse this model/API shape in a later public flow.
 
 Add `Reservation`:
 

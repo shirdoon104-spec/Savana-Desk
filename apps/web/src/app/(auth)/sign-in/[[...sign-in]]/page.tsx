@@ -8,7 +8,14 @@ export default function SignInPage() {
 
   return (
     <main className="auth-page">
-      <SignIn />
+      <SignIn
+        fallbackRedirectUrl="/app"
+        oauthFlow="redirect"
+        path="/sign-in"
+        routing="path"
+        signInUrl="/sign-in"
+        signUpUrl="/sign-up"
+      />
     </main>
   );
 }

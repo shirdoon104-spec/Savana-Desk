@@ -12,6 +12,7 @@ import { Transform, Type } from "class-transformer";
 import {
   IsDateString,
   IsEmail,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -132,6 +133,12 @@ class CheckInDto {
   @IsString()
   @MaxLength(32)
   phone?: string;
+}
+
+class CheckOutDto {
+  @IsOptional()
+  @IsBoolean()
+  acknowledgeRestaurantCharges?: boolean;
 }
 
 function allowedRoomStatusesForRole(role: TenantRole): RoomStatus[] {
@@ -403,6 +410,7 @@ export class PropertiesController {
     @CurrentTenant() context: TenantContext,
     @Param("propertyId") propertyId: string,
     @Param("roomId") roomId: string,
+    @Body() body: CheckOutDto,
   ) {
     await this.findTenantProperty(context.tenant.id, propertyId);
     const room = await this.findTenantRoom(context.tenant.id, propertyId, roomId);
@@ -417,6 +425,39 @@ export class PropertiesController {
 
     if (!activeStay) {
       throw new BadRequestException("This room does not have an active stay.");
+    }
+
+    const restaurantCharges = await this.prisma.folioCharge.findMany({
+      where: {
+        restaurantId: { not: null },
+        stayId: activeStay.id,
+        tenantId: context.tenant.id,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (restaurantCharges.length > 0 && !body?.acknowledgeRestaurantCharges) {
+      const total = restaurantCharges.reduce(
+        (sum, charge) => sum + Number(charge.amount),
+        0,
+      );
+      const currency = restaurantCharges[0]?.currency ?? "USD";
+      const chargeSummary = restaurantCharges
+        .map(
+          (charge) =>
+            `${charge.description || "Restaurant charge"} (${charge.currency} ${Number(
+              charge.amount,
+            ).toFixed(2)})`,
+        )
+        .join("; ");
+
+      throw new BadRequestException(
+        `Review ${restaurantCharges.length} posted restaurant charge${
+          restaurantCharges.length === 1 ? "" : "s"
+        } totaling ${currency} ${total.toFixed(
+          2,
+        )} before checkout: ${chargeSummary}. Confirm checkout to acknowledge these charges.`,
+      );
     }
 
     const stay = await this.prisma.$transaction(async (tx) => {

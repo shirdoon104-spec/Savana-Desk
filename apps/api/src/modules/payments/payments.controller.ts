@@ -160,24 +160,47 @@ export class PaymentsController {
       authorization_url?: string;
     };
 
-    await this.prisma.payment.create({
-      data: {
-        accessCode: checkout.access_code,
-        amount: request.amount,
-        checkoutUrl: checkout.authorization_url,
-        currency: request.currency,
-        customerPhone: request.customerPhone,
-        folioId: request.folioId,
-        idempotencyKey: request.idempotencyKey,
-        method: request.provider === "paystack" ? "paystack_checkout" : request.provider,
-        orderId: request.orderId,
-        propertyId: request.propertyId,
-        provider: request.provider,
-        providerTransactionId: result.providerTransactionId,
-        restaurantId: request.restaurantId,
-        status: result.status,
-        tenantId: context.tenant.id,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.payment.create({
+        data: {
+          accessCode: checkout.access_code,
+          amount: request.amount,
+          checkoutUrl: checkout.authorization_url,
+          currency: request.currency,
+          customerPhone: request.customerPhone,
+          folioId: request.folioId,
+          idempotencyKey: request.idempotencyKey,
+          method: request.provider === "paystack" ? "paystack_checkout" : request.provider,
+          orderId: request.orderId,
+          propertyId: request.propertyId,
+          provider: request.provider,
+          providerTransactionId: result.providerTransactionId,
+          restaurantId: request.restaurantId,
+          status: result.status,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      if (request.orderId && request.restaurantId) {
+        await tx.orderAuditLog.create({
+          data: {
+            actorId: context.tenantUser.id,
+            actorRole: context.role,
+            event: "payment_initiated",
+            newState: toPrismaJson({
+              amount: request.amount,
+              currency: request.currency,
+              method: request.provider,
+              providerTransactionId: result.providerTransactionId,
+              status: result.status,
+            }),
+            orderId: request.orderId,
+            propertyId: request.propertyId,
+            restaurantId: request.restaurantId,
+            tenantId: context.tenant.id,
+          },
+        });
+      }
     });
 
     return result;
@@ -288,7 +311,9 @@ export class PaymentsController {
         }
 
         await closeRestaurantOrderForPayment(tx, {
+          amount: payment.amount,
           orderId: payment.orderId,
+          reference,
           tenantId: payment.tenantId,
         });
       }
@@ -355,14 +380,10 @@ export class PaymentsController {
       throw new BadRequestException("Payment currency does not match the order.");
     }
 
-    if (toSubunitAmount(Number(order.totalAmount)) !== toSubunitAmount(request.amount)) {
+    if (!new Prisma.Decimal(request.amount).equals(order.totalAmount)) {
       throw new BadRequestException("Payment amount does not match the order.");
     }
   }
-}
-
-function toSubunitAmount(amount: number) {
-  return Math.round(amount * 100);
 }
 
 function canTakeRestaurantPayment(role: TenantRole) {
@@ -588,7 +609,9 @@ export class PaystackWebhookController {
       });
 
       await closeRestaurantOrderForPayment(tx, {
+        amount: payment.amount,
         orderId: payment.orderId,
+        reference,
         tenantId: payment.tenantId,
       });
 
@@ -801,9 +824,15 @@ function toPrismaJson(value: unknown): Prisma.InputJsonValue {
 async function closeRestaurantOrderForPayment(
   tx: {
     order: Pick<PrismaService["order"], "findFirst" | "update">;
+    orderAuditLog: Pick<PrismaService["orderAuditLog"], "create">;
     restaurantTable: Pick<PrismaService["restaurantTable"], "update">;
   },
-  payment: { orderId: string | null; tenantId: string },
+  payment: {
+    amount?: Prisma.Decimal.Value;
+    orderId: string | null;
+    reference?: string;
+    tenantId: string;
+  },
 ) {
   if (!payment.orderId) {
     return;
@@ -820,9 +849,45 @@ async function closeRestaurantOrderForPayment(
     return;
   }
 
-  await tx.order.update({
+  const updatedOrder = await tx.order.update({
     where: { id: order.id },
-    data: { status: "closed" },
+    data: {
+      closedAt: new Date(),
+      paymentStatus: "paid",
+      status: "closed",
+    },
+  });
+
+  await tx.orderAuditLog.create({
+    data: {
+      event: "payment_confirmed",
+      newState: toPrismaJson({
+        amount: payment.amount?.toString(),
+        reference: payment.reference,
+      }),
+      orderId: order.id,
+      propertyId: order.propertyId,
+      restaurantId: order.restaurantId,
+      tenantId: order.tenantId,
+    },
+  });
+
+  await tx.orderAuditLog.create({
+    data: {
+      event: "order_closed",
+      newState: toPrismaJson({
+        paymentStatus: updatedOrder.paymentStatus,
+        status: updatedOrder.status,
+      }),
+      orderId: order.id,
+      previousState: toPrismaJson({
+        paymentStatus: order.paymentStatus,
+        status: order.status,
+      }),
+      propertyId: order.propertyId,
+      restaurantId: order.restaurantId,
+      tenantId: order.tenantId,
+    },
   });
 
   if (order.tableId) {

@@ -2,15 +2,34 @@
 
 import { useAuth, useOrganization, useUser } from "@clerk/nextjs";
 import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Ban,
+  CheckCircle2,
+  Clock3,
   CreditCard,
+  Percent,
   Plus,
+  Printer,
   RefreshCw,
   ReceiptText,
+  Search,
+  ShieldCheck,
+  BarChart3,
+  Trash2,
   Users,
   Utensils,
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
+import {
+  countQueuedRestaurantActions,
+  enqueueRestaurantAction,
+  listQueuedRestaurantActions,
+  markRestaurantActionsFailed,
+  markRestaurantActionsSynced,
+  markRestaurantActionsTerminal,
+} from "./offline-actions";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -47,13 +66,18 @@ interface RestaurantResponse {
       id: string;
       items: Array<{
         id: string;
+        course?: number;
         menuItemId: string | null;
         name: string;
         notes: string | null;
         quantity: number;
+        status?: string;
         totalPrice: number;
         unitPrice: number;
       }>;
+      notes: string | null;
+      paidAmount: number;
+      paymentStatus: string;
       status: string;
       tableId: string | null;
       totalAmount: number;
@@ -61,8 +85,10 @@ interface RestaurantResponse {
     menuCategories: Array<{
       id: string;
       items: Array<{
+        allergens: string[];
         categoryId: string | null;
           currency: string;
+          dietary: string[];
           description: string | null;
           id: string;
           imageUrl: string | null;
@@ -72,8 +98,10 @@ interface RestaurantResponse {
       name: string;
     }>;
     menuItems: Array<{
+      allergens: string[];
       categoryId: string | null;
       currency: string;
+      dietary: string[];
       description: string | null;
       id: string;
       imageUrl: string | null;
@@ -84,6 +112,31 @@ interface RestaurantResponse {
       id: string;
       name: string;
     };
+    reservations: Array<{
+      createdAt: string;
+      guestName: string;
+      id: string;
+      items: Array<{
+        id: string;
+        menuItemId: string | null;
+        name: string;
+        notes: string | null;
+        quantity: number;
+        totalPrice: number;
+        unitPrice: number;
+      }>;
+      notes: string | null;
+      partySize: number;
+      scheduledAt: string;
+      status: string;
+      suggestedTables: Array<{
+        coverCount: number;
+        id: string;
+        name: string;
+        status: string;
+      }>;
+      tableId: string | null;
+    }>;
     serviceStyle: string | null;
     tables: Array<{
       assignedWaiterName: string | null;
@@ -102,6 +155,69 @@ interface PaymentInitiationResponse {
     authorization_url?: string;
   };
   status: string;
+}
+
+interface ActiveStayOption {
+  checkoutDate: string | null;
+  folioId: string;
+  guestName: string;
+  outstandingBalance: string;
+  roomNumber: string;
+  stayId: string;
+}
+
+interface OfflineConflictAction {
+  actionType: string;
+  actorUserId: string;
+  conflictReason: string | null;
+  createdAt: string;
+  deviceId: string;
+  entityId: string | null;
+  entityType: string;
+  id: string;
+  lastError: string | null;
+  occurredAt: string;
+  payload: unknown;
+  propertyId: string;
+  restaurantId: string | null;
+  retryCount: number;
+  status: string;
+  updatedAt: string;
+}
+
+interface LiveDashboardResponse {
+  generatedAt: string;
+  kds: {
+    averagePrepMinutesByCourse: Array<{
+      averageMinutes: string;
+      course: number;
+      sampleSize: number;
+    }>;
+    stationQueueDepth: Array<{
+      preparing: number;
+      ready: number;
+      sent: number;
+      station: string;
+      total: number;
+    }>;
+  };
+  openOrders: {
+    count: number;
+    outstandingValue: string;
+    paidValue: string;
+    totalValue: string;
+  };
+  roomCharges: {
+    confirmedPosted: Array<{
+      amount: string;
+      currency: string;
+      method: string;
+    }>;
+  };
+  tables: {
+    activeTableCount: number;
+    coversInHouse: number;
+  };
 }
 
 async function readApiMessage(response: Response, fallback: string) {
@@ -127,6 +243,98 @@ function isCompletedOrder(status: string) {
   return ["closed", "cancelled"].includes(status);
 }
 
+function isGuestQrOrder(
+  order: RestaurantResponse["restaurants"][number]["orders"][number],
+) {
+  return order.status === "draft" && order.notes?.startsWith("QR guest");
+}
+
+function formatElapsedTime(startedAt: string) {
+  const elapsedMinutes = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(startedAt).getTime()) / 60000),
+  );
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
+}
+
+function summarizeOfflinePayload(action: OfflineConflictAction) {
+  if (!action.payload || typeof action.payload !== "object" || Array.isArray(action.payload)) {
+    return action.entityId ? `Entity ${action.entityId}` : "No structured payload";
+  }
+
+  const payload = action.payload as {
+    amount?: unknown;
+    items?: unknown;
+    orderId?: unknown;
+    tableId?: unknown;
+  };
+
+  if (typeof payload.orderId === "string" && typeof payload.amount === "number") {
+    return `Order ${payload.orderId} for ${payload.amount.toFixed(2)}`;
+  }
+
+  if (typeof payload.orderId === "string" && typeof payload.tableId === "string") {
+    return `Order ${payload.orderId} to table ${payload.tableId}`;
+  }
+
+  if (Array.isArray(payload.items)) {
+    return `${payload.items.length} item${payload.items.length === 1 ? "" : "s"}`;
+  }
+
+  return typeof payload.orderId === "string" ? `Order ${payload.orderId}` : "Review payload";
+}
+
+const paymentMethods = [
+  { id: "paystack", label: "Paystack" },
+  { id: "cash", label: "Cash" },
+  { id: "card_manual", label: "Card" },
+  { id: "room_charge", label: "Room" },
+  { id: "voucher", label: "Voucher" },
+  { id: "complimentary", label: "Comp" },
+];
+
+const managerActions = [
+  { id: "discount", label: "Discount" },
+  { id: "void_item", label: "Void item" },
+  { id: "transfer", label: "Transfer" },
+  { id: "cancel", label: "Cancel" },
+  { id: "reprint", label: "Reprint" },
+];
+
+const allergenOptions = ["nuts", "gluten", "dairy", "eggs", "shellfish", "soy"];
+const dietaryOptions = ["vegan", "vegetarian", "halal", "kosher", "gluten_free"];
+const reservationStatuses = ["confirmed", "waitlisted", "seated", "cancelled", "no_show"];
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getRestaurantDeviceId() {
+  const key = "rayaan-pos-device-id";
+  const existing = window.localStorage.getItem(key);
+
+  if (existing) {
+    return existing;
+  }
+
+  const deviceId = crypto.randomUUID();
+  window.localStorage.setItem(key, deviceId);
+
+  return deviceId;
+}
+
 export default function RestaurantsPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
@@ -143,9 +351,23 @@ export default function RestaurantsPage() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newMenuItemCategoryId, setNewMenuItemCategoryId] = useState("");
   const [newMenuItemDescription, setNewMenuItemDescription] = useState("");
+  const [newMenuItemAllergens, setNewMenuItemAllergens] = useState<string[]>([]);
+  const [newMenuItemDietary, setNewMenuItemDietary] = useState<string[]>([]);
   const [newMenuItemImageUrl, setNewMenuItemImageUrl] = useState("");
   const [newMenuItemName, setNewMenuItemName] = useState("");
   const [newMenuItemPrice, setNewMenuItemPrice] = useState("");
+  const [reservationGuestName, setReservationGuestName] = useState("");
+  const [reservationNotes, setReservationNotes] = useState("");
+  const [reservationPartySize, setReservationPartySize] = useState("2");
+  const [reservationScheduledAt, setReservationScheduledAt] = useState(
+    new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
+  );
+  const [reservationStatus, setReservationStatus] = useState("confirmed");
+  const [reservationTableId, setReservationTableId] = useState("");
+  const [reservationItems, setReservationItems] = useState<
+    Array<{ menuItemId: string; notes: string; quantity: number }>
+  >([]);
+  const [isReservationModalOpen, setIsReservationModalOpen] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState("");
   const [tableCoverCount, setTableCoverCount] = useState("0");
   const [tableWaiterUserId, setTableWaiterUserId] = useState("");
@@ -154,12 +376,43 @@ export default function RestaurantsPage() {
   const [orderMenuItemId, setOrderMenuItemId] = useState("");
   const [orderItemNotes, setOrderItemNotes] = useState("");
   const [orderItemQuantity, setOrderItemQuantity] = useState("1");
+  const [orderMenuSearch, setOrderMenuSearch] = useState("");
+  const [selectedMenuCategoryId, setSelectedMenuCategoryId] = useState("all");
   const [orderItems, setOrderItems] = useState<
     Array<{ menuItemId: string; notes: string; quantity: number }>
   >([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentDrawerOrderId, setPaymentDrawerOrderId] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState("paystack");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentSplitMode, setPaymentSplitMode] = useState<"equal" | "items">("equal");
+  const [paymentSplitCount, setPaymentSplitCount] = useState("1");
+  const [paymentSplitItemIds, setPaymentSplitItemIds] = useState<string[]>([]);
+  const [paymentReference, setPaymentReference] = useState("");
+  const [cashTendered, setCashTendered] = useState("");
+  const [staySearch, setStaySearch] = useState("");
+  const [stayOptions, setStayOptions] = useState<ActiveStayOption[]>([]);
+  const [selectedFolioId, setSelectedFolioId] = useState("");
+  const [managerPanelOrderId, setManagerPanelOrderId] = useState<string | null>(null);
+  const [managerAction, setManagerAction] = useState("discount");
+  const [managerActionError, setManagerActionError] = useState<string | null>(null);
+  const [discountType, setDiscountType] = useState("fixed");
+  const [discountAmount, setDiscountAmount] = useState("");
+  const [discountLabel, setDiscountLabel] = useState("");
+  const [discountItemId, setDiscountItemId] = useState("");
+  const [voidItemId, setVoidItemId] = useState("");
+  const [voidReason, setVoidReason] = useState("");
+  const [transferTableId, setTransferTableId] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
+  const [isOnline, setIsOnline] = useState(true);
+  const [queuedActionCount, setQueuedActionCount] = useState(0);
+  const [offlineConflicts, setOfflineConflicts] = useState<OfflineConflictAction[]>([]);
+  const [reviewingConflictId, setReviewingConflictId] = useState<string | null>(null);
+  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reportKind, setReportKind] = useState<"z-report" | "shift-report">("z-report");
+  const [liveDashboard, setLiveDashboard] = useState<LiveDashboardResponse | null>(null);
   const [orderListMode, setOrderListMode] = useState<"active" | "history">(
     "active",
   );
@@ -171,6 +424,61 @@ export default function RestaurantsPage() {
       ) ?? data?.restaurants[0],
     [data?.restaurants, selectedRestaurantId],
   );
+
+  function toggleNewMenuFlag(kind: "allergens" | "dietary", value: string) {
+    const setter =
+      kind === "allergens" ? setNewMenuItemAllergens : setNewMenuItemDietary;
+
+    setter((current) =>
+      current.includes(value)
+        ? current.filter((candidate) => candidate !== value)
+        : [...current, value],
+    );
+  }
+
+  function addReservationItem(menuItemId: string) {
+    setReservationItems((current) => {
+      const existing = current.find((item) => item.menuItemId === menuItemId);
+
+      if (existing) {
+        return current.map((item) =>
+          item.menuItemId === menuItemId
+            ? { ...item, quantity: item.quantity + 1 }
+            : item,
+        );
+      }
+
+      return [...current, { menuItemId, notes: "", quantity: 1 }];
+    });
+  }
+
+  function updateReservationItemQuantity(index: number, quantity: number) {
+    setReservationItems((current) =>
+      current
+        .map((item, itemIndex) =>
+          itemIndex === index ? { ...item, quantity } : item,
+        )
+        .filter((item) => item.quantity > 0),
+    );
+  }
+
+  const reportQuery = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (reportDate) {
+      params.set("date", reportDate);
+    }
+
+    if (selectedRestaurant?.property.id) {
+      params.set("propertyId", selectedRestaurant.property.id);
+    }
+
+    if (selectedRestaurant?.id) {
+      params.set("restaurantId", selectedRestaurant.id);
+    }
+
+    return params.toString();
+  }, [reportDate, selectedRestaurant?.id, selectedRestaurant?.property.id]);
 
   const ordersByTable = useMemo(() => {
     const orderMap = new Map<string, RestaurantResponse["restaurants"][number]["orders"]>();
@@ -229,12 +537,89 @@ export default function RestaurantsPage() {
       ),
     [selectedRestaurant?.orders],
   );
+  const upcomingReservations = useMemo(
+    () =>
+      (selectedRestaurant?.reservations ?? []).filter(
+        (reservation) => !["cancelled", "no_show"].includes(reservation.status),
+      ),
+    [selectedRestaurant?.reservations],
+  );
   const completedOrders = useMemo(
     () =>
       (selectedRestaurant?.orders ?? []).filter((order) =>
         isCompletedOrder(order.status),
       ),
     [selectedRestaurant?.orders],
+  );
+
+  const managerPanelOrder = useMemo(
+    () =>
+      (selectedRestaurant?.orders ?? []).find(
+        (order) => order.id === managerPanelOrderId,
+      ) ?? null,
+    [managerPanelOrderId, selectedRestaurant?.orders],
+  );
+
+  const paymentDrawerOrder = useMemo(
+    () =>
+      activeOrders.find((order) => order.id === paymentDrawerOrderId) ?? null,
+    [activeOrders, paymentDrawerOrderId],
+  );
+
+  const paymentOutstanding = useMemo(() => {
+    if (!paymentDrawerOrder) {
+      return 0;
+    }
+
+    return Math.max(
+      0,
+      paymentDrawerOrder.totalAmount - (paymentDrawerOrder.paidAmount ?? 0),
+    );
+  }, [paymentDrawerOrder]);
+
+  const paymentDrawerTableName = useMemo(() => {
+    if (!paymentDrawerOrder) {
+      return "";
+    }
+
+    return paymentDrawerOrder.tableId
+      ? selectedRestaurant?.tables.find(
+          (table) => table.id === paymentDrawerOrder.tableId,
+        )?.name ?? "Table"
+      : "Counter / takeaway";
+  }, [paymentDrawerOrder, selectedRestaurant?.tables]);
+
+  const cashChange = useMemo(() => {
+    const tendered = Number(cashTendered) || 0;
+    const amount = Number(paymentAmount) || paymentOutstanding;
+
+    return Math.max(0, tendered - amount);
+  }, [cashTendered, paymentAmount, paymentOutstanding]);
+
+  const splitAmount = useMemo(() => {
+    const count = Math.max(1, Number(paymentSplitCount) || 1);
+
+    return paymentOutstanding > 0 ? paymentOutstanding / count : 0;
+  }, [paymentOutstanding, paymentSplitCount]);
+
+  const itemSplitAmount = useMemo(() => {
+    if (!paymentDrawerOrder) {
+      return 0;
+    }
+
+    return paymentDrawerOrder.items
+      .filter((item) => paymentSplitItemIds.includes(item.id))
+      .reduce((total, item) => total + item.totalPrice, 0);
+  }, [paymentDrawerOrder, paymentSplitItemIds]);
+
+  const transferTableOptions = useMemo(
+    () =>
+      selectedRestaurant?.tables.filter(
+        (table) =>
+          table.id !== managerPanelOrder?.tableId &&
+          !["seated", "ordering", "served"].includes(table.status),
+      ) ?? [],
+    [managerPanelOrder?.tableId, selectedRestaurant?.tables],
   );
 
   const orderTotal = useMemo(() => {
@@ -246,6 +631,23 @@ export default function RestaurantsPage() {
       return total + (menuItem?.price ?? 0) * item.quantity;
     }, 0);
   }, [orderItems, selectedRestaurant?.menuItems]);
+
+  const filteredMenuItems = useMemo(() => {
+    const search = orderMenuSearch.trim().toLowerCase();
+
+    return (selectedRestaurant?.menuItems ?? []).filter((item) => {
+      const matchesCategory =
+        selectedMenuCategoryId === "all" ||
+        (selectedMenuCategoryId === "uncategorized" && !item.categoryId) ||
+        item.categoryId === selectedMenuCategoryId;
+      const matchesSearch =
+        !search ||
+        item.name.toLowerCase().includes(search) ||
+        item.description?.toLowerCase().includes(search);
+
+      return matchesCategory && matchesSearch;
+    });
+  }, [orderMenuSearch, selectedMenuCategoryId, selectedRestaurant?.menuItems]);
 
   async function getOrganizationToken() {
     return getToken(organization ? { organizationId: organization.id } : undefined);
@@ -293,9 +695,278 @@ export default function RestaurantsPage() {
     }
   }
 
+  async function loadOfflineConflicts() {
+    if (!isLoaded || !isSignedIn) {
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      return;
+    }
+
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/sync/conflicts`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as { actions?: OfflineConflictAction[] };
+    setOfflineConflicts(payload.actions ?? []);
+  }
+
+  async function markOfflineConflictReviewed(actionId: string) {
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setError("Select or create a workspace organization before reviewing conflicts.");
+      return;
+    }
+
+    setReviewingConflictId(actionId);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/sync/conflicts/${actionId}/resolve`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        method: "POST",
+      },
+    );
+
+    setReviewingConflictId(null);
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not mark conflict reviewed."));
+      return;
+    }
+
+    await loadOfflineConflicts();
+  }
+
+  async function openAuthenticatedReport(format: "json" | "csv") {
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setError("Select or create a workspace organization before opening reports.");
+      return;
+    }
+
+    const basePath =
+      reportKind === "shift-report"
+        ? "reports/restaurant-shift-report"
+        : "reports/restaurant-z-report";
+    const path = format === "csv" ? `${basePath}.csv` : basePath;
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/${path}?${reportQuery}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not open restaurant report."));
+      return;
+    }
+
+    const blob =
+      format === "csv"
+        ? await response.blob()
+        : new Blob([JSON.stringify(await response.json(), null, 2)], {
+            type: "application/json",
+          });
+    const url = URL.createObjectURL(blob);
+
+    if (format === "csv") {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `restaurant-${reportKind}-${reportDate || "today"}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function loadLiveDashboard() {
+    if (!isLoaded || !isSignedIn || !selectedRestaurant) {
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("propertyId", selectedRestaurant.property.id);
+    params.set("restaurantId", selectedRestaurant.id);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/reports/restaurant-live-dashboard?${params.toString()}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (!response.ok) {
+      return;
+    }
+
+    setLiveDashboard((await response.json()) as LiveDashboardResponse);
+  }
+
+  async function flushQueuedRestaurantActions() {
+    if (!isLoaded || !isSignedIn || typeof navigator === "undefined" || !navigator.onLine) {
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      return;
+    }
+
+    const queuedActions = await listQueuedRestaurantActions();
+
+    if (!queuedActions.length) {
+      setQueuedActionCount(0);
+      return;
+    }
+
+    const batch = queuedActions.slice(0, 100);
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/sync/actions`, {
+        body: JSON.stringify(batch),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        await markRestaurantActionsFailed(batch.map((action) => action.id));
+        setQueuedActionCount(await countQueuedRestaurantActions());
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        accepted?: Array<{ id: string; message?: string; status: string }>;
+      };
+      const syncedIds =
+        payload.accepted
+          ?.filter((action) => action.status === "synced")
+          .map((action) => action.id) ?? [];
+      const failedIds =
+        payload.accepted
+          ?.filter((action) => action.status === "failed")
+          .map((action) => action.id) ?? [];
+      const terminalActions =
+        payload.accepted
+          ?.filter(
+            (
+              action,
+            ): action is {
+              id: string;
+              message?: string;
+              status: "conflicted" | "rejected";
+            } => action.status === "conflicted" || action.status === "rejected",
+          )
+          .map((action) => ({
+            id: action.id,
+            message: action.message,
+            status: action.status,
+          })) ?? [];
+
+      if (syncedIds.length) {
+        await markRestaurantActionsSynced(syncedIds);
+      }
+
+      if (failedIds.length) {
+        await markRestaurantActionsFailed(failedIds);
+      }
+
+      if (terminalActions.length) {
+        await markRestaurantActionsTerminal(terminalActions);
+        setError(
+          `${terminalActions.length} offline action${
+            terminalActions.length === 1 ? "" : "s"
+          } need manager review.`,
+        );
+        await loadOfflineConflicts();
+      }
+
+      setQueuedActionCount(await countQueuedRestaurantActions());
+      await loadRestaurants();
+    } catch {
+      await markRestaurantActionsFailed(batch.map((action) => action.id));
+      setQueuedActionCount(await countQueuedRestaurantActions());
+    }
+  }
+
   useEffect(() => {
     void loadRestaurants();
   }, [getToken, isLoaded, isSignedIn, organization]);
+
+  useEffect(() => {
+    if (data?.canManageRestaurant) {
+      void loadOfflineConflicts();
+      void loadLiveDashboard();
+    } else {
+      setOfflineConflicts([]);
+      setLiveDashboard(null);
+    }
+  }, [
+    data?.canManageRestaurant,
+    getToken,
+    isLoaded,
+    isSignedIn,
+    organization,
+    selectedRestaurant?.id,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const refreshQueueCount = () => {
+      void countQueuedRestaurantActions()
+        .then(setQueuedActionCount)
+        .catch(() => setQueuedActionCount(0));
+    };
+    const updateOnlineState = () => {
+      setIsOnline(navigator.onLine);
+      refreshQueueCount();
+    };
+
+    updateOnlineState();
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isOnline) {
+      void flushQueuedRestaurantActions();
+    }
+  }, [getToken, isLoaded, isOnline, isSignedIn, organization]);
 
   useEffect(() => {
     if (!selectedTable) {
@@ -441,7 +1112,9 @@ export default function RestaurantsPage() {
       `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/menu-items`,
       {
         body: JSON.stringify({
+          allergens: newMenuItemAllergens,
           categoryId: newMenuItemCategoryId || undefined,
+          dietary: newMenuItemDietary,
           description: newMenuItemDescription || undefined,
           imageUrl: newMenuItemImageUrl || undefined,
           name: newMenuItemName,
@@ -463,9 +1136,94 @@ export default function RestaurantsPage() {
     }
 
     setNewMenuItemDescription("");
+    setNewMenuItemAllergens([]);
+    setNewMenuItemDietary([]);
     setNewMenuItemImageUrl("");
     setNewMenuItemName("");
     setNewMenuItemPrice("");
+    await loadRestaurants();
+  }
+
+  async function createReservation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+
+    const token = await getOrganizationToken();
+    const restaurantId = selectedRestaurant?.id;
+
+    if (!token || !restaurantId) {
+      setError("Choose a restaurant before creating reservations.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/reservations`,
+      {
+        body: JSON.stringify({
+          guestName: reservationGuestName,
+          notes: reservationNotes || undefined,
+          items: reservationItems,
+          partySize: Number(reservationPartySize),
+          scheduledAt: new Date(reservationScheduledAt).toISOString(),
+          status: reservationStatus,
+          tableId: reservationTableId || undefined,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not create reservation."));
+      return;
+    }
+
+    setReservationGuestName("");
+    setReservationNotes("");
+    setReservationPartySize("2");
+    setReservationStatus("confirmed");
+    setReservationTableId("");
+    setReservationItems([]);
+    setIsReservationModalOpen(false);
+    await loadRestaurants();
+  }
+
+  async function updateReservation(
+    reservationId: string,
+    body: Record<string, unknown>,
+  ) {
+    const token = await getOrganizationToken();
+    const restaurantId = selectedRestaurant?.id;
+
+    if (!token || !restaurantId) {
+      setError("Choose a restaurant before updating reservations.");
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/reservations/${reservationId}`,
+      {
+        body: JSON.stringify(body),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not update reservation."));
+      return;
+    }
+
     await loadRestaurants();
   }
 
@@ -485,6 +1243,7 @@ export default function RestaurantsPage() {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
         },
         method: "PATCH",
       },
@@ -521,6 +1280,7 @@ export default function RestaurantsPage() {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
         },
         method: "PATCH",
       },
@@ -542,7 +1302,7 @@ export default function RestaurantsPage() {
     const token = await getOrganizationToken();
     const restaurantId = selectedRestaurant?.id;
 
-    if (!token || !restaurantId) {
+    if (!token || !restaurantId || !data || !selectedRestaurant) {
       setError("Choose a restaurant before creating an order.");
       setIsSubmitting(false);
       return;
@@ -555,27 +1315,79 @@ export default function RestaurantsPage() {
     }
 
     const idempotencyKey = crypto.randomUUID();
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/orders`,
-      {
-        body: JSON.stringify({
-          idempotencyKey,
-          items: orderItems,
-          tableId: orderTableId || undefined,
-        }),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": idempotencyKey,
+    const payload = {
+      idempotencyKey,
+      items: orderItems,
+      tableId: orderTableId || undefined,
+    };
+
+    if (!isOnline) {
+      await enqueueRestaurantAction({
+        actionType: "order.create",
+        actorUserId: data.currentUser.clerkUserId,
+        createdAt: new Date().toISOString(),
+        deviceId: getRestaurantDeviceId(),
+        entityType: "order",
+        id: crypto.randomUUID(),
+        idempotencyKey,
+        occurredAt: new Date().toISOString(),
+        payload,
+        propertyId: selectedRestaurant.property.id,
+        restaurantId,
+        retryCount: 0,
+        status: "queued",
+        tenantId: data.tenant.id,
+      });
+      setQueuedActionCount(await countQueuedRestaurantActions());
+      setOrderItems([]);
+      setOrderTableId("");
+      setIsSubmitting(false);
+      setError("Offline order queued. It will sync when the connection is restored.");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/orders`,
+        {
+          body: JSON.stringify(payload),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKey,
+          },
+          method: "POST",
         },
-        method: "POST",
-      },
-    );
+      );
 
-    setIsSubmitting(false);
+      setIsSubmitting(false);
 
-    if (!response.ok) {
-      setError(await readApiMessage(response, "Could not create order."));
+      if (!response.ok) {
+        setError(await readApiMessage(response, "Could not create order."));
+        return;
+      }
+    } catch {
+      await enqueueRestaurantAction({
+        actionType: "order.create",
+        actorUserId: data.currentUser.clerkUserId,
+        createdAt: new Date().toISOString(),
+        deviceId: getRestaurantDeviceId(),
+        entityType: "order",
+        id: crypto.randomUUID(),
+        idempotencyKey,
+        occurredAt: new Date().toISOString(),
+        payload,
+        propertyId: selectedRestaurant.property.id,
+        restaurantId,
+        retryCount: 0,
+        status: "queued",
+        tenantId: data.tenant.id,
+      });
+      setQueuedActionCount(await countQueuedRestaurantActions());
+      setOrderItems([]);
+      setOrderTableId("");
+      setIsSubmitting(false);
+      setError("Network dropped. Order queued locally for sync.");
       return;
     }
 
@@ -600,6 +1412,36 @@ export default function RestaurantsPage() {
     setOrderItemNotes("");
     setOrderItemQuantity("1");
     setOrderMenuItemId("");
+  }
+
+  function addMenuItemToDraft(menuItemId: string) {
+    setOrderItems((current) => {
+      const existingIndex = current.findIndex(
+        (item) => item.menuItemId === menuItemId && !item.notes,
+      );
+
+      if (existingIndex === -1) {
+        return [...current, { menuItemId, notes: "", quantity: 1 }];
+      }
+
+      return current.map((item, index) =>
+        index === existingIndex
+          ? { ...item, quantity: item.quantity + 1 }
+          : item,
+      );
+    });
+  }
+
+  function updateDraftItemQuantity(index: number, quantity: number) {
+    if (quantity < 1) {
+      return;
+    }
+
+    setOrderItems((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, quantity } : item,
+      ),
+    );
   }
 
   async function updateOrderStatus(orderId: string, status: string) {
@@ -692,6 +1534,367 @@ export default function RestaurantsPage() {
     window.location.href = checkoutUrl;
   }
 
+  function openPaymentDrawer(
+    order: RestaurantResponse["restaurants"][number]["orders"][number],
+  ) {
+    const outstanding = Math.max(0, order.totalAmount - (order.paidAmount ?? 0));
+
+    setPaymentDrawerOrderId(order.id);
+    setPaymentMethod("paystack");
+    setPaymentAmount(outstanding.toFixed(2));
+    setPaymentSplitMode("equal");
+    setPaymentSplitCount("1");
+    setPaymentSplitItemIds([]);
+    setPaymentReference("");
+    setCashTendered("");
+    setStaySearch("");
+    setStayOptions([]);
+    setSelectedFolioId("");
+    setPaymentError(null);
+  }
+
+  function applyEqualSplit() {
+    setPaymentAmount(splitAmount.toFixed(2));
+    setPaymentError(null);
+  }
+
+  function toggleSplitItem(itemId: string) {
+    setPaymentSplitItemIds((current) =>
+      current.includes(itemId)
+        ? current.filter((candidate) => candidate !== itemId)
+        : [...current, itemId],
+    );
+    setPaymentError(null);
+  }
+
+  function applyItemSplit() {
+    if (itemSplitAmount <= 0) {
+      setPaymentError("Choose at least one item for item split.");
+      return;
+    }
+
+    setPaymentAmount(Math.min(itemSplitAmount, paymentOutstanding).toFixed(2));
+    setPaymentError(null);
+  }
+
+  function openManagerPanel(
+    order: RestaurantResponse["restaurants"][number]["orders"][number],
+  ) {
+    const firstItem = order.items.find((item) => item.status !== "voided");
+
+    setManagerPanelOrderId(order.id);
+    setManagerAction(isCompletedOrder(order.status) ? "reprint" : "discount");
+    setManagerActionError(null);
+    setDiscountType("fixed");
+    setDiscountAmount("");
+    setDiscountLabel("");
+    setDiscountItemId(firstItem?.id ?? "");
+    setVoidItemId(firstItem?.id ?? "");
+    setVoidReason("");
+    setTransferTableId("");
+    setCancelReason("");
+  }
+
+  function closeManagerPanel() {
+    setManagerPanelOrderId(null);
+    setManagerActionError(null);
+  }
+
+  async function searchActiveStays() {
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setPaymentError("Select or create a workspace organization before searching stays.");
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/stays/active?search=${encodeURIComponent(staySearch)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (!response.ok) {
+      setPaymentError(await readApiMessage(response, "Could not search active stays."));
+      return;
+    }
+
+    setStayOptions((await response.json()) as ActiveStayOption[]);
+  }
+
+  async function recordManualPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!paymentDrawerOrder || !selectedRestaurant) {
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setPaymentError("Select or create a workspace organization before taking payment.");
+      return;
+    }
+
+    const amount = Number(paymentAmount) || paymentOutstanding;
+
+    if (amount <= 0) {
+      setPaymentError("Enter a valid payment amount.");
+      return;
+    }
+
+    setPayingOrderId(paymentDrawerOrder.id);
+    setPaymentError(null);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${paymentDrawerOrder.id}/pay`,
+      {
+        body: JSON.stringify({
+          amount,
+          method: paymentMethod,
+          reference: paymentReference || undefined,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        method: "POST",
+      },
+    );
+
+    setPayingOrderId(null);
+
+    if (!response.ok) {
+      setPaymentError(await readApiMessage(response, "Could not record payment."));
+      return;
+    }
+
+    const updatedOrder =
+      (await response.json()) as RestaurantResponse["restaurants"][number]["orders"][number];
+
+    if (isCompletedOrder(updatedOrder.status)) {
+      printReceipt(updatedOrder);
+    }
+
+    setPaymentDrawerOrderId(null);
+    await loadRestaurants();
+  }
+
+  async function chargeOrderToRoom() {
+    if (!paymentDrawerOrder || !selectedRestaurant || !selectedFolioId) {
+      setPaymentError("Choose an active stay before charging to room.");
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setPaymentError("Select or create a workspace organization before charging to room.");
+      return;
+    }
+
+    setPayingOrderId(paymentDrawerOrder.id);
+    setPaymentError(null);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/folios/${selectedFolioId}/charges`,
+      {
+        body: JSON.stringify({
+          amount: paymentOutstanding,
+          description: `Restaurant order ${paymentDrawerOrder.id}`,
+          orderId: paymentDrawerOrder.id,
+          restaurantId: selectedRestaurant.id,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        method: "POST",
+      },
+    );
+
+    setPayingOrderId(null);
+
+    if (!response.ok) {
+      setPaymentError(await readApiMessage(response, "Could not charge order to room."));
+      return;
+    }
+
+    printReceipt({
+      ...paymentDrawerOrder,
+      paidAmount: paymentDrawerOrder.totalAmount,
+      paymentStatus: "paid",
+      status: "closed",
+    });
+
+    setPaymentDrawerOrderId(null);
+    await loadRestaurants();
+  }
+
+  function printReceipt(
+    order: RestaurantResponse["restaurants"][number]["orders"][number],
+  ) {
+    const tableName = order.tableId
+      ? selectedRestaurant?.tables.find((table) => table.id === order.tableId)?.name ??
+        "Table"
+      : "Counter / takeaway";
+    const printedAt = new Date().toLocaleString();
+    const rows = order.items
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.quantity.toString())}x ${escapeHtml(item.name)}</td>
+            <td>${escapeHtml(order.currency)} ${item.totalPrice.toFixed(2)}</td>
+          </tr>
+        `,
+      )
+      .join("");
+    const printWindow = window.open("", "_blank", "width=420,height=720");
+
+    if (!printWindow) {
+      setError("Allow popups to print receipts.");
+      setPaymentError("Allow popups to print receipts.");
+      setManagerActionError("Allow popups to reprint receipts.");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Receipt ${escapeHtml(order.id)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+            h1, h2, p { margin: 0; }
+            header { border-bottom: 1px solid #d0d5dd; margin-bottom: 16px; padding-bottom: 12px; }
+            h1 { font-size: 20px; }
+            table { border-collapse: collapse; margin: 16px 0; width: 100%; }
+            td { border-bottom: 1px solid #eaecf0; padding: 8px 0; }
+            td:last-child { text-align: right; }
+            .total { display: flex; font-size: 18px; font-weight: 700; justify-content: space-between; }
+            .muted { color: #667085; font-size: 12px; margin-top: 4px; }
+          </style>
+        </head>
+        <body>
+          <header>
+            <h1>${escapeHtml(selectedRestaurant?.name ?? "Restaurant")}</h1>
+            <p>${escapeHtml(tableName)}</p>
+            <p class="muted">Order ${escapeHtml(order.id)}</p>
+            <p class="muted">Printed ${escapeHtml(printedAt)}</p>
+          </header>
+          <table><tbody>${rows}</tbody></table>
+          <section class="total">
+            <span>Total</span>
+            <span>${escapeHtml(order.currency)} ${order.totalAmount.toFixed(2)}</span>
+          </section>
+          <script>
+            window.addEventListener("load", () => {
+              window.print();
+            });
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  }
+
+  async function submitManagerAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!managerPanelOrder || !selectedRestaurant) {
+      return;
+    }
+
+    if (managerAction === "reprint") {
+      printReceipt(managerPanelOrder);
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setManagerActionError("Select or create a workspace organization before manager actions.");
+      return;
+    }
+
+    let endpoint = "";
+    let body: Record<string, unknown> = {};
+
+    if (managerAction === "discount") {
+      const amount = Number(discountAmount);
+
+      if (amount <= 0) {
+        setManagerActionError("Enter a valid discount amount.");
+        return;
+      }
+
+      endpoint = "discount";
+      body = {
+        amount,
+        label: discountLabel || undefined,
+        orderItemId: discountType === "item" ? discountItemId : undefined,
+        type: discountType,
+      };
+    }
+
+    if (managerAction === "void_item") {
+      if (!voidItemId || voidReason.trim().length < 3) {
+        setManagerActionError("Choose an item and enter a void reason.");
+        return;
+      }
+
+      endpoint = `items/${voidItemId}/void`;
+      body = { voidReason };
+    }
+
+    if (managerAction === "transfer") {
+      if (!transferTableId) {
+        setManagerActionError("Choose an available target table.");
+        return;
+      }
+
+      endpoint = "transfer-table";
+      body = { tableId: transferTableId };
+    }
+
+    if (managerAction === "cancel") {
+      endpoint = "cancel";
+      body = { reason: cancelReason || undefined };
+    }
+
+    setIsSubmitting(true);
+    setManagerActionError(null);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${managerPanelOrder.id}/${endpoint}`,
+      {
+        body: JSON.stringify(body),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        method: "POST",
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setManagerActionError(
+        await readApiMessage(response, "Could not complete manager action."),
+      );
+      return;
+    }
+
+    closeManagerPanel();
+    await loadRestaurants();
+  }
+
   return (
     <div className="operations-grid">
       <section className="notice-panel operations-header">
@@ -701,6 +1904,12 @@ export default function RestaurantsPage() {
           <p>
             Manage tables and simple restaurant orders inside the active tenant.
           </p>
+          <div className="offline-status-row">
+            <span data-online={isOnline}>
+              {isOnline ? "Online" : "Offline"}
+            </span>
+            <span>{queuedActionCount} queued action{queuedActionCount === 1 ? "" : "s"}</span>
+          </div>
         </div>
         <button
           disabled={loadState === "loading"}
@@ -713,6 +1922,155 @@ export default function RestaurantsPage() {
       </section>
 
       {error ? <div className="form-error">{error}</div> : null}
+
+      {data?.canManageRestaurant && offlineConflicts.length ? (
+        <section className="offline-review-panel">
+          <div className="offline-review-header">
+            <AlertTriangle aria-hidden="true" />
+            <div>
+              <p className="eyebrow">Offline review</p>
+              <h3>
+                {offlineConflicts.length} action
+                {offlineConflicts.length === 1 ? "" : "s"} need review
+              </h3>
+            </div>
+          </div>
+          <div className="offline-review-list">
+            {offlineConflicts.map((action) => (
+              <article className="offline-review-item" key={action.id}>
+                <div>
+                  <span>{formatLabel(action.actionType)}</span>
+                  <strong>{summarizeOfflinePayload(action)}</strong>
+                  <p>
+                    {action.conflictReason ?? action.lastError ?? "Manual review required."}
+                  </p>
+                  <small>
+                    {formatLabel(action.status)} - {action.retryCount} retries -{" "}
+                    {new Date(action.occurredAt).toLocaleString()}
+                  </small>
+                </div>
+                <button
+                  disabled={reviewingConflictId === action.id}
+                  onClick={() => void markOfflineConflictReviewed(action.id)}
+                  type="button"
+                >
+                  <CheckCircle2 aria-hidden="true" />
+                  {reviewingConflictId === action.id ? "Saving" : "Reviewed"}
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {data?.canManageRestaurant && selectedRestaurant ? (
+        <section className="restaurant-report-panel">
+          <div>
+            <BarChart3 aria-hidden="true" />
+            <div>
+              <p className="eyebrow">Reconciliation</p>
+              <h3>{reportKind === "z-report" ? "End-of-day Z-report" : "Shift report"}</h3>
+              <span>
+                {selectedRestaurant.name} - {selectedRestaurant.property.name}
+              </span>
+            </div>
+          </div>
+          <div className="report-kind-toggle" aria-label="Choose report">
+            <button
+              data-selected={reportKind === "z-report"}
+              onClick={() => setReportKind("z-report")}
+              type="button"
+            >
+              Z-report
+            </button>
+            <button
+              data-selected={reportKind === "shift-report"}
+              onClick={() => setReportKind("shift-report")}
+              type="button"
+            >
+              Shift
+            </button>
+          </div>
+          <label>
+            Business date
+            <input
+              onChange={(event) => setReportDate(event.target.value)}
+              type="date"
+              value={reportDate}
+            />
+          </label>
+          <button
+            onClick={() => void openAuthenticatedReport("json")}
+            type="button"
+          >
+            View JSON
+          </button>
+          <button
+            onClick={() => void openAuthenticatedReport("csv")}
+            type="button"
+          >
+            Download CSV
+          </button>
+        </section>
+      ) : null}
+
+      {data?.canManageRestaurant && liveDashboard ? (
+        <section className="live-dashboard-panel">
+          <div className="live-dashboard-header">
+            <BarChart3 aria-hidden="true" />
+            <div>
+              <p className="eyebrow">Live manager dashboard</p>
+              <h3>Now in service</h3>
+              <span>Updated {new Date(liveDashboard.generatedAt).toLocaleTimeString()}</span>
+            </div>
+            <button onClick={() => void loadLiveDashboard()} type="button">
+              <RefreshCw aria-hidden="true" />
+              Refresh
+            </button>
+          </div>
+          <div className="live-dashboard-grid">
+            <div>
+              <span>Open orders</span>
+              <strong>{liveDashboard.openOrders.count}</strong>
+              <small>{liveDashboard.openOrders.totalValue} total value</small>
+            </div>
+            <div>
+              <span>Outstanding</span>
+              <strong>{liveDashboard.openOrders.outstandingValue}</strong>
+              <small>{liveDashboard.openOrders.paidValue} paid</small>
+            </div>
+            <div>
+              <span>Covers in-house</span>
+              <strong>{liveDashboard.tables.coversInHouse}</strong>
+              <small>{liveDashboard.tables.activeTableCount} active tables</small>
+            </div>
+            <div>
+              <span>Room charges</span>
+              <strong>
+                {liveDashboard.roomCharges.confirmedPosted[0]?.amount ?? "0"}
+              </strong>
+              <small>
+                {liveDashboard.roomCharges.confirmedPosted[0]?.currency ?? "posted"}
+              </small>
+            </div>
+          </div>
+          <div className="kds-depth-list">
+            {liveDashboard.kds.stationQueueDepth.length ? (
+              liveDashboard.kds.stationQueueDepth.map((station) => (
+                <div key={station.station}>
+                  <span>{formatLabel(station.station)}</span>
+                  <strong>{station.total}</strong>
+                  <small>
+                    {station.sent} sent - {station.preparing} preparing - {station.ready} ready
+                  </small>
+                </div>
+              ))
+            ) : (
+              <p>No active kitchen queue.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       <section className="status-grid property-stats">
         <div>
@@ -825,13 +2183,27 @@ export default function RestaurantsPage() {
 
           {selectedRestaurant ? (
             <>
-              <section className="notice-panel property-detail-card">
-                <p className="eyebrow">Table floor</p>
-                <h2>{selectedRestaurant.name}</h2>
-                <p>
-                  {selectedRestaurant.property.name} -{" "}
-                  {selectedRestaurant.serviceStyle ?? "restaurant service"}
-                </p>
+              <section className="notice-panel property-detail-card pos-floor-section">
+                <div className="pos-floor-header">
+                  <div>
+                    <p className="eyebrow">Floor map</p>
+                    <h2>{selectedRestaurant.name}</h2>
+                    <p>
+                      {selectedRestaurant.property.name} -{" "}
+                      {selectedRestaurant.serviceStyle ?? "restaurant service"}
+                    </p>
+                  </div>
+                  <div className="floor-status-legend" aria-label="Table status legend">
+                    {["free", "reserved", "seated", "ordering", "served", "cleaning"].map(
+                      (status) => (
+                        <span key={status}>
+                          <i data-status={status} />
+                          {formatLabel(status)}
+                        </span>
+                      ),
+                    )}
+                  </div>
+                </div>
 
                 <div className="restaurant-table-grid">
                   {selectedRestaurant.tables.map((table) => {
@@ -853,8 +2225,10 @@ export default function RestaurantsPage() {
                         type="button"
                       >
                         <span className="table-card-topline">
-                          <Utensils aria-hidden="true" />
-                          <span>{formatLabel(table.status)}</span>
+                          <span className="table-status-label">
+                            <i data-status={table.status} />
+                            {formatLabel(table.status)}
+                          </span>
                         </span>
                         <strong>{table.name}</strong>
                         <span className="table-card-meta">
@@ -868,11 +2242,13 @@ export default function RestaurantsPage() {
                         </span>
 
                         {activeOrder ? (
-                          <small>
-                            Active: {activeOrder.currency}{" "}
-                            {activeOrder.totalAmount.toFixed(2)} -{" "}
-                            {formatLabel(activeOrder.status)}
-                          </small>
+                          <span className="table-order-chip">
+                            <Clock3 aria-hidden="true" />
+                            {formatElapsedTime(activeOrder.createdAt)}
+                            <strong>
+                              {activeOrder.currency} {activeOrder.totalAmount.toFixed(2)}
+                            </strong>
+                          </span>
                         ) : null}
                       </button>
                     );
@@ -886,14 +2262,46 @@ export default function RestaurantsPage() {
                 {selectedTable ? (
                   <div className="table-service-panel">
                     <div>
-                      <p className="eyebrow">Selected table</p>
+                      <p className="eyebrow">Order panel</p>
                       <h3>{selectedTable.name}</h3>
                       <p>
                         {activeTableOrder
                           ? `${activeTableOrder.currency} ${activeTableOrder.totalAmount.toFixed(2)} open order`
                           : "No open order on this table"}
                       </p>
+                      {selectedTable.qrCode ? (
+                        <a className="secondary-link" href={selectedTable.qrCode}>
+                          Open QR menu
+                        </a>
+                      ) : null}
                     </div>
+                    {activeTableOrder && isGuestQrOrder(activeTableOrder) ? (
+                      <div className="guest-order-review">
+                        <div>
+                          <p className="eyebrow">Guest QR order</p>
+                          <strong>Review before kitchen</strong>
+                          <span>
+                            {activeTableOrder.currency}{" "}
+                            {activeTableOrder.totalAmount.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="guest-order-items">
+                          {activeTableOrder.items.map((item) => (
+                            <span key={item.id}>
+                              {item.quantity}x {item.name}
+                              {item.notes ? ` - ${item.notes}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => updateOrderStatus(activeTableOrder.id, "sent")}
+                          type="button"
+                        >
+                          <CheckCircle2 aria-hidden="true" />
+                          Confirm & send
+                        </button>
+                      </div>
+                    ) : null}
                     <form className="table-service-form" onSubmit={updateTableDetails}>
                       <label>
                         Status
@@ -948,7 +2356,257 @@ export default function RestaurantsPage() {
                     </form>
                   </div>
                 ) : null}
+
+                {data?.canManageRestaurant ? (
+                  <div className="reservation-panel">
+                    <div className="reservation-header">
+                      <div>
+                        <p className="eyebrow">Reservations</p>
+                        <h3>Booking and waitlist</h3>
+                      </div>
+                      <strong>{upcomingReservations.length}</strong>
+                      <button
+                        onClick={() => setIsReservationModalOpen(true)}
+                        type="button"
+                      >
+                        <Plus aria-hidden="true" />
+                        New booking
+                      </button>
+                    </div>
+
+                    <div className="reservation-list">
+                      {upcomingReservations.map((reservation) => {
+                        const tableName = reservation.tableId
+                          ? selectedRestaurant.tables.find(
+                              (table) => table.id === reservation.tableId,
+                            )?.name ?? "Table"
+                          : "No table";
+
+                        return (
+                          <article className="reservation-row" key={reservation.id}>
+                            <div>
+                              <strong>{reservation.guestName}</strong>
+                              <span>
+                                {reservation.partySize} guest
+                                {reservation.partySize === 1 ? "" : "s"} -{" "}
+                                {new Date(reservation.scheduledAt).toLocaleString()}
+                              </span>
+                              <small>
+                                {formatLabel(reservation.status)} - {tableName}
+                              </small>
+                              {reservation.notes ? <small>{reservation.notes}</small> : null}
+                              {reservation.items.length ? (
+                                <div className="reservation-items">
+                                  {reservation.items.map((item) => (
+                                    <small key={item.id}>
+                                      {item.quantity}x {item.name}
+                                    </small>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {!reservation.tableId &&
+                              reservation.suggestedTables.length ? (
+                                <div className="reservation-suggestions">
+                                  {reservation.suggestedTables.map((table) => (
+                                    <button
+                                      key={table.id}
+                                      onClick={() =>
+                                        updateReservation(reservation.id, {
+                                          status:
+                                            reservation.status === "waitlisted"
+                                              ? "confirmed"
+                                              : reservation.status,
+                                          tableId: table.id,
+                                        })
+                                      }
+                                      type="button"
+                                    >
+                                      {table.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="reservation-actions">
+                              <button
+                                disabled={reservation.status === "seated"}
+                                onClick={() =>
+                                  updateReservation(reservation.id, {
+                                    status: "seated",
+                                    tableId:
+                                      reservation.tableId ||
+                                      reservation.suggestedTables[0]?.id ||
+                                      "",
+                                  })
+                                }
+                                type="button"
+                              >
+                                Seat
+                              </button>
+                              <select
+                                aria-label={`Status for ${reservation.guestName}`}
+                                onChange={(event) =>
+                                  updateReservation(reservation.id, {
+                                    status: event.target.value,
+                                  })
+                                }
+                                value={reservation.status}
+                              >
+                                {reservationStatuses.map((status) => (
+                                  <option key={status} value={status}>
+                                    {formatLabel(status)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {!upcomingReservations.length ? (
+                        <div className="empty-state">
+                          No reservations or waitlist entries.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </section>
+
+              {isReservationModalOpen ? (
+                <div className="modal-backdrop" role="presentation">
+                  <section
+                    aria-modal="true"
+                    className="reservation-modal"
+                    role="dialog"
+                  >
+                    <div className="reservation-header">
+                      <div>
+                        <p className="eyebrow">Booking</p>
+                        <h3>New reservation</h3>
+                      </div>
+                      <button
+                        onClick={() => setIsReservationModalOpen(false)}
+                        type="button"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <form className="reservation-form modal-form" onSubmit={createReservation}>
+                      <label>
+                        Guest
+                        <input
+                          onChange={(event) => setReservationGuestName(event.target.value)}
+                          placeholder="Guest name"
+                          required
+                          value={reservationGuestName}
+                        />
+                      </label>
+                      <label>
+                        Party
+                        <input
+                          min="1"
+                          onChange={(event) => setReservationPartySize(event.target.value)}
+                          required
+                          type="number"
+                          value={reservationPartySize}
+                        />
+                      </label>
+                      <label>
+                        Time
+                        <input
+                          onChange={(event) => setReservationScheduledAt(event.target.value)}
+                          required
+                          type="datetime-local"
+                          value={reservationScheduledAt}
+                        />
+                      </label>
+                      <label>
+                        Table
+                        <select
+                          onChange={(event) => setReservationTableId(event.target.value)}
+                          value={reservationTableId}
+                        >
+                          <option value="">Suggest later</option>
+                          {selectedRestaurant.tables.map((table) => (
+                            <option key={table.id} value={table.id}>
+                              {table.name} - {formatLabel(table.status)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Type
+                        <select
+                          onChange={(event) => setReservationStatus(event.target.value)}
+                          value={reservationStatus}
+                        >
+                          <option value="confirmed">Reservation</option>
+                          <option value="waitlisted">Waitlist</option>
+                        </select>
+                      </label>
+                      <label className="reservation-notes">
+                        Notes
+                        <input
+                          onChange={(event) => setReservationNotes(event.target.value)}
+                          placeholder="Occasion, preferences..."
+                          value={reservationNotes}
+                        />
+                      </label>
+
+                      <div className="reservation-item-picker">
+                        <div>
+                          <strong>Requested items</strong>
+                          <span>Optional pre-order for the booking.</span>
+                        </div>
+                        <select
+                          onChange={(event) => {
+                            if (event.target.value) {
+                              addReservationItem(event.target.value);
+                              event.target.value = "";
+                            }
+                          }}
+                        >
+                          <option value="">Add menu item</option>
+                          {selectedRestaurant.menuItems.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name} - {item.currency} {item.price.toFixed(2)}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="reservation-items">
+                          {reservationItems.map((item, index) => {
+                            const menuItem = selectedRestaurant.menuItems.find(
+                              (candidate) => candidate.id === item.menuItemId,
+                            );
+
+                            return (
+                              <div key={`${item.menuItemId}-${index}`}>
+                                <span>{menuItem?.name ?? "Menu item"}</span>
+                                <input
+                                  min="0"
+                                  onChange={(event) =>
+                                    updateReservationItemQuantity(
+                                      index,
+                                      Number(event.target.value),
+                                    )
+                                  }
+                                  type="number"
+                                  value={item.quantity}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <button disabled={isSubmitting} type="submit">
+                        <Plus aria-hidden="true" />
+                        Save booking
+                      </button>
+                    </form>
+                  </section>
+                </div>
+              ) : null}
 
               {data?.canManageRestaurant ? (
                 <section className="notice-panel compact-panel">
@@ -1029,6 +2687,36 @@ export default function RestaurantsPage() {
                         value={newMenuItemImageUrl}
                       />
                     </label>
+                    <fieldset className="menu-flag-fieldset">
+                      <legend>Allergens</legend>
+                      <div className="menu-flag-options">
+                        {allergenOptions.map((option) => (
+                          <label key={option}>
+                            <input
+                              checked={newMenuItemAllergens.includes(option)}
+                              onChange={() => toggleNewMenuFlag("allergens", option)}
+                              type="checkbox"
+                            />
+                            {formatLabel(option)}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <fieldset className="menu-flag-fieldset">
+                      <legend>Dietary</legend>
+                      <div className="menu-flag-options">
+                        {dietaryOptions.map((option) => (
+                          <label key={option}>
+                            <input
+                              checked={newMenuItemDietary.includes(option)}
+                              onChange={() => toggleNewMenuFlag("dietary", option)}
+                              type="checkbox"
+                            />
+                            {formatLabel(option)}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
                     <button disabled={isSubmitting} type="submit">
                       <Plus aria-hidden="true" />
                       Add item
@@ -1054,6 +2742,24 @@ export default function RestaurantsPage() {
                         <span>
                           {item.currency} {item.price.toFixed(2)}
                         </span>
+                        {item.allergens.length ? (
+                          <div className="menu-item-flags">
+                            {item.allergens.map((flag) => (
+                              <small className="allergen-flag" key={flag}>
+                                {formatLabel(flag)}
+                              </small>
+                            ))}
+                          </div>
+                        ) : null}
+                        {item.dietary.length ? (
+                          <div className="menu-item-flags">
+                            {item.dietary.map((flag) => (
+                              <small className="dietary-flag" key={flag}>
+                                {formatLabel(flag)}
+                              </small>
+                            ))}
+                          </div>
+                        ) : null}
                         {item.description ? <small>{item.description}</small> : null}
                       </div>
                     ))}
@@ -1067,25 +2773,200 @@ export default function RestaurantsPage() {
               <section className="notice-panel compact-panel">
                 <p className="eyebrow">Orders</p>
                 {data?.canCreateOrder ? (
-                  <form className="restaurant-order-builder" onSubmit={createOrder}>
-                    <div className="restaurant-order-form">
-                      <label>
-                        Table
-                        <select
-                          onChange={(event) => setOrderTableId(event.target.value)}
-                          value={orderTableId}
+                  <form className="restaurant-order-builder pos-order-builder" onSubmit={createOrder}>
+                    <section className="pos-menu-panel">
+                      <div className="pos-builder-toolbar">
+                        <label>
+                          Table
+                          <select
+                            onChange={(event) => setOrderTableId(event.target.value)}
+                            value={orderTableId}
+                          >
+                            <option value="">Counter / takeaway</option>
+                            {selectedRestaurant.tables.map((table) => (
+                              <option key={table.id} value={table.id}>
+                                {table.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="pos-search-field">
+                          Search
+                          <span>
+                            <Search aria-hidden="true" />
+                            <input
+                              onChange={(event) => setOrderMenuSearch(event.target.value)}
+                              placeholder="Find menu item"
+                              value={orderMenuSearch}
+                            />
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className="pos-category-tabs" role="tablist" aria-label="Menu categories">
+                        <button
+                          aria-selected={selectedMenuCategoryId === "all"}
+                          data-selected={selectedMenuCategoryId === "all"}
+                          onClick={() => setSelectedMenuCategoryId("all")}
+                          role="tab"
+                          type="button"
                         >
-                          <option value="">Counter / takeaway</option>
-                          {selectedRestaurant.tables.map((table) => (
-                            <option key={table.id} value={table.id}>
-                              {table.name}
-                            </option>
-                          ))}
-                        </select>
+                          All
+                        </button>
+                        {selectedRestaurant.menuCategories.map((category) => (
+                          <button
+                            aria-selected={selectedMenuCategoryId === category.id}
+                            data-selected={selectedMenuCategoryId === category.id}
+                            key={category.id}
+                            onClick={() => setSelectedMenuCategoryId(category.id)}
+                            role="tab"
+                            type="button"
+                          >
+                            {category.name}
+                          </button>
+                        ))}
+                        {selectedRestaurant.menuItems.some((item) => !item.categoryId) ? (
+                          <button
+                            aria-selected={selectedMenuCategoryId === "uncategorized"}
+                            data-selected={selectedMenuCategoryId === "uncategorized"}
+                            onClick={() => setSelectedMenuCategoryId("uncategorized")}
+                            role="tab"
+                            type="button"
+                          >
+                            Other
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div className="pos-menu-grid">
+                        {filteredMenuItems.map((item) => (
+                          <button
+                            className="pos-menu-tile"
+                            key={item.id}
+                            onClick={() => addMenuItemToDraft(item.id)}
+                            type="button"
+                          >
+                            {item.imageUrl ? (
+                              <img alt="" loading="lazy" src={item.imageUrl} />
+                            ) : (
+                              <span aria-hidden="true">
+                                <Utensils />
+                              </span>
+                            )}
+                            <strong>{item.name}</strong>
+                            <small>
+                              {item.currency} {item.price.toFixed(2)}
+                            </small>
+                            {item.allergens.length || item.dietary.length ? (
+                              <div className="pos-menu-flags">
+                                {[...item.allergens, ...item.dietary].slice(0, 3).map((flag) => (
+                                  <small key={flag}>{formatLabel(flag)}</small>
+                                ))}
+                              </div>
+                            ) : null}
+                          </button>
+                        ))}
+                        {!filteredMenuItems.length ? (
+                          <div className="empty-state">No matching menu items.</div>
+                        ) : null}
+                      </div>
+                    </section>
+
+                    <aside className="pos-ticket-panel">
+                      <div className="pos-ticket-header">
+                        <div>
+                          <p className="eyebrow">Current order</p>
+                          <h3>
+                            {orderTableId
+                              ? selectedRestaurant.tables.find(
+                                  (table) => table.id === orderTableId,
+                                )?.name ?? "Table"
+                              : "Counter / takeaway"}
+                          </h3>
+                        </div>
+                        <strong>{orderItems.length}</strong>
+                      </div>
+
+                      <div className="order-draft-list pos-ticket-list">
+                        {orderItems.map((item, index) => {
+                          const menuItem = selectedRestaurant.menuItems.find(
+                            (candidate) => candidate.id === item.menuItemId,
+                          );
+
+                          return (
+                            <div className="order-draft-row pos-ticket-row" key={`${item.menuItemId}-${index}`}>
+                              <div>
+                                <strong>{menuItem?.name ?? "Menu item"}</strong>
+                                <span>
+                                  {menuItem?.currency ?? selectedRestaurant.orders[0]?.currency ?? "USD"}{" "}
+                                  {((menuItem?.price ?? 0) * item.quantity).toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="quantity-stepper">
+                                <button
+                                  aria-label={`Decrease ${menuItem?.name ?? "item"} quantity`}
+                                  onClick={() =>
+                                    updateDraftItemQuantity(index, item.quantity - 1)
+                                  }
+                                  type="button"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  aria-label={`Quantity for ${menuItem?.name ?? "item"}`}
+                                  min="1"
+                                  onChange={(event) =>
+                                    updateDraftItemQuantity(
+                                      index,
+                                      Number(event.target.value) || 1,
+                                    )
+                                  }
+                                  type="number"
+                                  value={item.quantity}
+                                />
+                                <button
+                                  aria-label={`Increase ${menuItem?.name ?? "item"} quantity`}
+                                  onClick={() =>
+                                    updateDraftItemQuantity(index, item.quantity + 1)
+                                  }
+                                  type="button"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <button
+                                aria-label={`Remove ${menuItem?.name ?? "item"}`}
+                                className="danger-button"
+                                onClick={() =>
+                                  setOrderItems((current) =>
+                                    current.filter((_, itemIndex) => itemIndex !== index),
+                                  )
+                                }
+                                type="button"
+                              >
+                                <Trash2 aria-hidden="true" />
+                              </button>
+                            </div>
+                          );
+                        })}
+
+                        {!orderItems.length ? (
+                          <div className="empty-state">Tap menu items to build an order.</div>
+                        ) : null}
+                      </div>
+
+                      <label className="pos-ticket-notes">
+                        Notes for next manual add
+                        <input
+                          onChange={(event) => setOrderItemNotes(event.target.value)}
+                          placeholder="No onions"
+                          value={orderItemNotes}
+                        />
                       </label>
-                      <label>
-                        Menu item
+
+                      <div className="pos-manual-add">
                         <select
+                          aria-label="Manual menu item"
                           onChange={(event) => setOrderMenuItemId(event.target.value)}
                           value={orderMenuItemId}
                         >
@@ -1096,74 +2977,27 @@ export default function RestaurantsPage() {
                             </option>
                           ))}
                         </select>
-                      </label>
-                      <label>
-                        Qty
                         <input
+                          aria-label="Manual item quantity"
                           min="1"
-                          onChange={(event) =>
-                            setOrderItemQuantity(event.target.value)
-                          }
+                          onChange={(event) => setOrderItemQuantity(event.target.value)}
                           type="number"
                           value={orderItemQuantity}
                         />
-                      </label>
-                    </div>
-                    <div className="restaurant-order-form">
-                      <label>
-                        Notes
-                        <input
-                          onChange={(event) => setOrderItemNotes(event.target.value)}
-                          placeholder="No onions"
-                          value={orderItemNotes}
-                        />
-                      </label>
-                      <button onClick={addOrderItem} type="button">
-                        <Plus aria-hidden="true" />
-                        Add item
-                      </button>
+                        <button onClick={addOrderItem} type="button">
+                          <Plus aria-hidden="true" />
+                        </button>
+                      </div>
+
+                      <div className="pos-ticket-total">
+                        <span>Total</span>
+                        <strong>{orderTotal.toFixed(2)}</strong>
+                      </div>
                       <button disabled={isSubmitting || !orderItems.length} type="submit">
                         <Plus aria-hidden="true" />
                         Send order
                       </button>
-                    </div>
-
-                    {orderItems.length ? (
-                      <div className="order-draft-list">
-                        {orderItems.map((item, index) => {
-                          const menuItem = selectedRestaurant.menuItems.find(
-                            (candidate) => candidate.id === item.menuItemId,
-                          );
-
-                          return (
-                            <div className="order-draft-row" key={`${item.menuItemId}-${index}`}>
-                              <span>
-                                {item.quantity}x {menuItem?.name ?? "Menu item"}
-                              </span>
-                              <strong>
-                                {menuItem?.currency ?? selectedRestaurant.orders[0]?.currency ?? "USD"}{" "}
-                                {((menuItem?.price ?? 0) * item.quantity).toFixed(2)}
-                              </strong>
-                              <button
-                                className="danger-button"
-                                onClick={() =>
-                                  setOrderItems((current) =>
-                                    current.filter((_, itemIndex) => itemIndex !== index),
-                                  )
-                                }
-                                type="button"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          );
-                        })}
-                        <div className="order-draft-total">
-                          <span>Total</span>
-                          <strong>{orderTotal.toFixed(2)}</strong>
-                        </div>
-                      </div>
-                    ) : null}
+                    </aside>
                   </form>
                 ) : null}
 
@@ -1209,6 +3043,511 @@ export default function RestaurantsPage() {
                     </div>
                   ) : null}
 
+                  {paymentDrawerOrder ? (
+                    <aside
+                      aria-label="Bill and payment drawer"
+                      className="payment-drawer"
+                    >
+                      <div className="payment-drawer-header">
+                        <div>
+                          <p className="eyebrow">Payment drawer</p>
+                          <h3>{paymentDrawerTableName}</h3>
+                          <span>
+                            {paymentDrawerOrder.items.length} item
+                            {paymentDrawerOrder.items.length === 1 ? "" : "s"} -{" "}
+                            {formatLabel(paymentDrawerOrder.paymentStatus)}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setPaymentDrawerOrderId(null)}
+                          type="button"
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      <div className="payment-drawer-note">
+                        Choose how this bill will be settled. Paystack opens the
+                        hosted checkout; cash, card, voucher, and comp are
+                        recorded by staff.
+                      </div>
+
+                      <div className="payment-summary-grid">
+                        <div>
+                          <span>Total</span>
+                          <strong>
+                            {paymentDrawerOrder.currency}{" "}
+                            {paymentDrawerOrder.totalAmount.toFixed(2)}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Paid</span>
+                          <strong>
+                            {paymentDrawerOrder.currency}{" "}
+                            {(paymentDrawerOrder.paidAmount ?? 0).toFixed(2)}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Outstanding</span>
+                          <strong>
+                            {paymentDrawerOrder.currency}{" "}
+                            {paymentOutstanding.toFixed(2)}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="payment-split-panel">
+                        <div
+                          aria-label="Choose split mode"
+                          className="payment-split-tabs"
+                          role="group"
+                        >
+                          <button
+                            aria-pressed={paymentSplitMode === "equal"}
+                            data-selected={paymentSplitMode === "equal"}
+                            onClick={() => setPaymentSplitMode("equal")}
+                            type="button"
+                          >
+                            Equal
+                          </button>
+                          <button
+                            aria-pressed={paymentSplitMode === "items"}
+                            data-selected={paymentSplitMode === "items"}
+                            onClick={() => setPaymentSplitMode("items")}
+                            type="button"
+                          >
+                            Items
+                          </button>
+                        </div>
+
+                        {paymentSplitMode === "equal" ? (
+                          <div className="payment-split-row">
+                            <div>
+                              <span>Equal split</span>
+                              <strong>
+                                {paymentDrawerOrder.currency} {splitAmount.toFixed(2)}
+                              </strong>
+                            </div>
+                            <label>
+                              Guests
+                              <input
+                                min="1"
+                                onChange={(event) =>
+                                  setPaymentSplitCount(event.target.value)
+                                }
+                                type="number"
+                                value={paymentSplitCount}
+                              />
+                            </label>
+                            <button onClick={applyEqualSplit} type="button">
+                              Use split
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="payment-item-split">
+                            <div>
+                              <span>Selected items</span>
+                              <strong>
+                                {paymentDrawerOrder.currency}{" "}
+                                {itemSplitAmount.toFixed(2)}
+                              </strong>
+                            </div>
+                            <div className="payment-item-split-list">
+                              {paymentDrawerOrder.items.map((item) => (
+                                <label key={item.id}>
+                                  <input
+                                    checked={paymentSplitItemIds.includes(item.id)}
+                                    onChange={() => toggleSplitItem(item.id)}
+                                    type="checkbox"
+                                  />
+                                  <span>
+                                    {item.quantity}x {item.name}
+                                  </span>
+                                  <strong>
+                                    {paymentDrawerOrder.currency}{" "}
+                                    {item.totalPrice.toFixed(2)}
+                                  </strong>
+                                </label>
+                              ))}
+                            </div>
+                            <button onClick={applyItemSplit} type="button">
+                              Use items
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        aria-label="Choose payment method"
+                        className="payment-method-grid"
+                        role="group"
+                      >
+                        {paymentMethods.map((method) => (
+                          <button
+                            aria-pressed={paymentMethod === method.id}
+                            data-selected={paymentMethod === method.id}
+                            key={method.id}
+                            onClick={() => {
+                              setPaymentMethod(method.id);
+                              setPaymentError(null);
+                            }}
+                            type="button"
+                          >
+                            {method.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {paymentMethod === "paystack" ? (
+                        <div className="payment-action-panel">
+                          <p>
+                            Start a hosted checkout for the outstanding bill
+                            using the existing Paystack payment flow.
+                          </p>
+                          <button
+                            disabled={
+                              payingOrderId === paymentDrawerOrder.id ||
+                              paymentOutstanding <= 0
+                            }
+                            onClick={() => void payOrderWithPaystack(paymentDrawerOrder)}
+                            type="button"
+                          >
+                            <CreditCard aria-hidden="true" />
+                            {payingOrderId === paymentDrawerOrder.id
+                              ? "Starting"
+                              : "Open Paystack"}
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {paymentMethod === "room_charge" ? (
+                        <div className="payment-action-panel">
+                          <div className="room-charge-search">
+                            <label>
+                              Guest or room
+                              <input
+                                onChange={(event) => setStaySearch(event.target.value)}
+                                placeholder="Search active stays"
+                                value={staySearch}
+                              />
+                            </label>
+                            <button
+                              onClick={() => void searchActiveStays()}
+                              type="button"
+                            >
+                              <Search aria-hidden="true" />
+                              Search
+                            </button>
+                          </div>
+                          <div className="stay-option-list">
+                            {stayOptions.map((stay) => (
+                              <button
+                                className="stay-option-card"
+                                data-selected={selectedFolioId === stay.folioId}
+                                key={stay.folioId}
+                                onClick={() => setSelectedFolioId(stay.folioId)}
+                                type="button"
+                              >
+                                <strong>{stay.guestName}</strong>
+                                <span>Room {stay.roomNumber}</span>
+                                <small>
+                                  Balance {stay.outstandingBalance}
+                                  {stay.checkoutDate
+                                    ? ` - Due ${new Date(stay.checkoutDate).toLocaleDateString()}`
+                                    : ""}
+                                </small>
+                              </button>
+                            ))}
+                            {!stayOptions.length ? (
+                              <div className="empty-state compact">
+                                Search for an active stay to charge this bill to a room.
+                              </div>
+                            ) : null}
+                          </div>
+                          <button
+                            disabled={
+                              payingOrderId === paymentDrawerOrder.id ||
+                              !selectedFolioId ||
+                              paymentOutstanding <= 0
+                            }
+                            onClick={() => void chargeOrderToRoom()}
+                            type="button"
+                          >
+                            <ReceiptText aria-hidden="true" />
+                            Charge to room
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {!["paystack", "room_charge"].includes(paymentMethod) ? (
+                        <form
+                          className="payment-action-panel"
+                          onSubmit={recordManualPayment}
+                        >
+                          <p>
+                            Record an in-person or approved manual settlement.
+                          </p>
+                          <div className="payment-form-grid">
+                            <label>
+                              Amount
+                              <input
+                                min="0"
+                                onChange={(event) => setPaymentAmount(event.target.value)}
+                                step="0.01"
+                                type="number"
+                                value={paymentAmount}
+                              />
+                            </label>
+                            <label>
+                              Reference
+                              <input
+                                onChange={(event) =>
+                                  setPaymentReference(event.target.value)
+                                }
+                                placeholder="Optional"
+                                value={paymentReference}
+                              />
+                            </label>
+                            {paymentMethod === "cash" ? (
+                              <label>
+                                Cash tendered
+                                <input
+                                  min="0"
+                                  onChange={(event) =>
+                                    setCashTendered(event.target.value)
+                                  }
+                                  step="0.01"
+                                  type="number"
+                                  value={cashTendered}
+                                />
+                              </label>
+                            ) : null}
+                          </div>
+                          {paymentMethod === "cash" ? (
+                            <div className="payment-change-due">
+                              <span>Change due</span>
+                              <strong>
+                                {paymentDrawerOrder.currency} {cashChange.toFixed(2)}
+                              </strong>
+                            </div>
+                          ) : null}
+                          <button
+                            disabled={
+                              payingOrderId === paymentDrawerOrder.id ||
+                              paymentOutstanding <= 0
+                            }
+                            type="submit"
+                          >
+                            <CreditCard aria-hidden="true" />
+                            {payingOrderId === paymentDrawerOrder.id
+                              ? "Recording"
+                              : "Record payment"}
+                          </button>
+                        </form>
+                      ) : null}
+                    </aside>
+                  ) : null}
+
+                  {data?.canManageRestaurant && managerPanelOrder ? (
+                    <aside
+                      aria-label="Manager action panel"
+                      className="manager-action-panel"
+                    >
+                      <div className="manager-action-header">
+                        <div>
+                          <p className="eyebrow">Manager actions</p>
+                          <h3>
+                            {managerPanelOrder.tableId
+                              ? selectedRestaurant.tables.find(
+                                  (table) => table.id === managerPanelOrder.tableId,
+                                )?.name ?? "Table"
+                              : "Counter / takeaway"}
+                          </h3>
+                          <span>
+                            Role checked by workspace permissions. Every server
+                            action writes an audit log.
+                          </span>
+                        </div>
+                        <button onClick={closeManagerPanel} type="button">
+                          Close
+                        </button>
+                      </div>
+
+                      {managerActionError ? (
+                        <div aria-live="polite" className="form-error" role="status">
+                          {managerActionError}
+                        </div>
+                      ) : null}
+
+                      <form onSubmit={submitManagerAction}>
+                        <div
+                          aria-label="Choose manager action"
+                          className="manager-action-tabs"
+                          role="group"
+                        >
+                          {managerActions
+                            .filter(
+                              (action) =>
+                                action.id === "reprint" ||
+                                !isCompletedOrder(managerPanelOrder.status),
+                            )
+                            .map((action) => (
+                              <button
+                                aria-pressed={managerAction === action.id}
+                                data-selected={managerAction === action.id}
+                                key={action.id}
+                                onClick={() => {
+                                  setManagerAction(action.id);
+                                  setManagerActionError(null);
+                                }}
+                                type="button"
+                              >
+                                {action.label}
+                              </button>
+                            ))}
+                        </div>
+
+                        {managerAction === "discount" ? (
+                          <div className="manager-action-grid">
+                            <label>
+                              Type
+                              <select
+                                onChange={(event) =>
+                                  setDiscountType(event.target.value)
+                                }
+                                value={discountType}
+                              >
+                                <option value="fixed">Fixed amount</option>
+                                <option value="percent">Percent</option>
+                                <option value="item">Item amount</option>
+                              </select>
+                            </label>
+                            <label>
+                              Amount
+                              <input
+                                min="0.01"
+                                onChange={(event) =>
+                                  setDiscountAmount(event.target.value)
+                                }
+                                step="0.01"
+                                type="number"
+                                value={discountAmount}
+                              />
+                            </label>
+                            <label>
+                              Label
+                              <input
+                                onChange={(event) =>
+                                  setDiscountLabel(event.target.value)
+                                }
+                                placeholder="Manager comp"
+                                value={discountLabel}
+                              />
+                            </label>
+                            {discountType === "item" ? (
+                              <label>
+                                Item
+                                <select
+                                  onChange={(event) =>
+                                    setDiscountItemId(event.target.value)
+                                  }
+                                  value={discountItemId}
+                                >
+                                  {managerPanelOrder.items.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.quantity}x {item.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {managerAction === "void_item" ? (
+                          <div className="manager-action-grid">
+                            <label>
+                              Item
+                              <select
+                                onChange={(event) =>
+                                  setVoidItemId(event.target.value)
+                                }
+                                value={voidItemId}
+                              >
+                                {managerPanelOrder.items.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.quantity}x {item.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="manager-action-wide">
+                              Reason
+                              <input
+                                onChange={(event) =>
+                                  setVoidReason(event.target.value)
+                                }
+                                placeholder="Wrong item, guest changed order..."
+                                value={voidReason}
+                              />
+                            </label>
+                          </div>
+                        ) : null}
+
+                        {managerAction === "transfer" ? (
+                          <div className="manager-action-grid">
+                            <label>
+                              Target table
+                              <select
+                                onChange={(event) =>
+                                  setTransferTableId(event.target.value)
+                                }
+                                value={transferTableId}
+                              >
+                                <option value="">Choose available table</option>
+                                {transferTableOptions.map((table) => (
+                                  <option key={table.id} value={table.id}>
+                                    {table.name} - {formatLabel(table.status)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                        ) : null}
+
+                        {managerAction === "cancel" ? (
+                          <div className="manager-action-grid">
+                            <label className="manager-action-wide">
+                              Cancellation reason
+                              <input
+                                onChange={(event) =>
+                                  setCancelReason(event.target.value)
+                                }
+                                placeholder="Guest left, duplicate order..."
+                                value={cancelReason}
+                              />
+                            </label>
+                          </div>
+                        ) : null}
+
+                        {managerAction === "reprint" ? (
+                          <div className="manager-action-note">
+                            Reprint the current receipt in the browser print dialog.
+                          </div>
+                        ) : null}
+
+                        <button disabled={isSubmitting} type="submit">
+                          {managerAction === "discount" ? <Percent aria-hidden="true" /> : null}
+                          {managerAction === "void_item" ? <Ban aria-hidden="true" /> : null}
+                          {managerAction === "transfer" ? <ArrowRightLeft aria-hidden="true" /> : null}
+                          {managerAction === "cancel" ? <Trash2 aria-hidden="true" /> : null}
+                          {managerAction === "reprint" ? <Printer aria-hidden="true" /> : null}
+                          {managerAction === "reprint" ? "Reprint receipt" : "Apply action"}
+                        </button>
+                      </form>
+                    </aside>
+                  ) : null}
+
                   {orderListMode === "active" ? (
                     <div className="order-compact-list">
                       {activeOrders.map((order) => {
@@ -1219,8 +3558,14 @@ export default function RestaurantsPage() {
                           : "Counter / takeaway";
 
                         return (
-                          <article className="order-compact-row" key={order.id}>
+                          <article
+                            className={`order-compact-row${isGuestQrOrder(order) ? " guest-order-row" : ""}`}
+                            key={order.id}
+                          >
                             <div className="order-compact-main">
+                              {isGuestQrOrder(order) ? (
+                                <span className="role-pill">Guest QR review</span>
+                              ) : null}
                               <strong>
                                 {order.currency} {order.totalAmount.toFixed(2)}
                               </strong>
@@ -1232,25 +3577,51 @@ export default function RestaurantsPage() {
                               </small>
                             </div>
                             <div className="order-compact-items">
-                              {order.items.slice(0, 2).map((item) => (
+                              {order.items.slice(0, isGuestQrOrder(order) ? 8 : 2).map((item) => (
                                 <span key={item.id}>
                                   {item.quantity}x {item.name}
+                                  {item.status ? ` (${formatLabel(item.status)})` : ""}
+                                  {item.notes ? ` - ${item.notes}` : ""}
                                 </span>
                               ))}
-                              {order.items.length > 2 ? (
-                                <span>+{order.items.length - 2} more</span>
+                              {order.items.length > (isGuestQrOrder(order) ? 8 : 2) ? (
+                                <span>
+                                  +{order.items.length - (isGuestQrOrder(order) ? 8 : 2)} more
+                                </span>
                               ) : null}
                             </div>
                             <div className="order-compact-actions">
+                              {isGuestQrOrder(order) ? (
+                                <button
+                                  aria-label={`Confirm guest QR order for ${tableName}`}
+                                  onClick={() => updateOrderStatus(order.id, "sent")}
+                                  type="button"
+                                >
+                                  <CheckCircle2 aria-hidden="true" />
+                                  Confirm & send
+                                </button>
+                              ) : null}
                               <button
                                 aria-label={`Pay order for ${tableName}`}
-                                disabled={payingOrderId === order.id}
-                                onClick={() => void payOrderWithPaystack(order)}
+                                disabled={payingOrderId === order.id || isGuestQrOrder(order)}
+                                onClick={() => openPaymentDrawer(order)}
                                 type="button"
                               >
                                 <CreditCard aria-hidden="true" />
-                                {payingOrderId === order.id ? "Starting" : "Pay"}
+                                {paymentDrawerOrderId === order.id
+                                  ? "Open bill"
+                                  : "Settle"}
                               </button>
+                              {data?.canManageRestaurant ? (
+                                <button
+                                  aria-label={`Open manager actions for ${tableName}`}
+                                  onClick={() => openManagerPanel(order)}
+                                  type="button"
+                                >
+                                  <ShieldCheck aria-hidden="true" />
+                                  Manager
+                                </button>
+                              ) : null}
                               {data?.allowedOrderStatuses.length ? (
                                 <label>
                                   <span className="sr-only">
@@ -1318,6 +3689,16 @@ export default function RestaurantsPage() {
                             <span className="role-pill">
                               {formatLabel(order.status)}
                             </span>
+                            {data?.canManageRestaurant ? (
+                              <button
+                                aria-label={`Reprint receipt for ${tableName}`}
+                                onClick={() => openManagerPanel(order)}
+                                type="button"
+                              >
+                                <Printer aria-hidden="true" />
+                                Reprint
+                              </button>
+                            ) : null}
                           </article>
                         );
                       })}
