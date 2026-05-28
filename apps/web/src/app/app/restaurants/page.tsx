@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Ban,
+  BellRing,
   CheckCircle2,
   Clock3,
   CreditCard,
@@ -19,6 +20,7 @@ import {
   Trash2,
   Users,
   Utensils,
+  X,
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -88,12 +90,15 @@ interface RestaurantResponse {
         allergens: string[];
         categoryId: string | null;
           currency: string;
+          currentStock: number | null;
           dietary: string[];
           description: string | null;
           id: string;
           imageUrl: string | null;
+          isAvailable: boolean;
           name: string;
           price: number;
+          stockEnabled: boolean;
       }>;
       name: string;
     }>;
@@ -101,12 +106,15 @@ interface RestaurantResponse {
       allergens: string[];
       categoryId: string | null;
       currency: string;
+      currentStock: number | null;
       dietary: string[];
       description: string | null;
       id: string;
       imageUrl: string | null;
+      isAvailable: boolean;
       name: string;
       price: number;
+      stockEnabled: boolean;
     }>;
     property: {
       id: string;
@@ -185,6 +193,17 @@ interface OfflineConflictAction {
   updatedAt: string;
 }
 
+interface FrontOfHouseNotification {
+  course?: number;
+  id: string;
+  message: string;
+  orderId: string;
+  receivedAt: string;
+  tableId: string | null;
+  tableName: string;
+  type: "course_ready" | "order_alert";
+}
+
 interface LiveDashboardResponse {
   generatedAt: string;
   kds: {
@@ -247,6 +266,12 @@ function isGuestQrOrder(
   order: RestaurantResponse["restaurants"][number]["orders"][number],
 ) {
   return order.status === "draft" && order.notes?.startsWith("QR guest");
+}
+
+function isKitchenReadyItem(item: {
+  status?: string;
+}) {
+  return item.status === "ready";
 }
 
 function formatElapsedTime(startedAt: string) {
@@ -354,8 +379,11 @@ export default function RestaurantsPage() {
   const [newMenuItemAllergens, setNewMenuItemAllergens] = useState<string[]>([]);
   const [newMenuItemDietary, setNewMenuItemDietary] = useState<string[]>([]);
   const [newMenuItemImageUrl, setNewMenuItemImageUrl] = useState("");
+  const [newMenuItemIsAvailable, setNewMenuItemIsAvailable] = useState(true);
   const [newMenuItemName, setNewMenuItemName] = useState("");
   const [newMenuItemPrice, setNewMenuItemPrice] = useState("");
+  const [newMenuItemStock, setNewMenuItemStock] = useState("");
+  const [newMenuItemStockEnabled, setNewMenuItemStockEnabled] = useState(false);
   const [reservationGuestName, setReservationGuestName] = useState("");
   const [reservationNotes, setReservationNotes] = useState("");
   const [reservationPartySize, setReservationPartySize] = useState("2");
@@ -413,6 +441,11 @@ export default function RestaurantsPage() {
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
   const [reportKind, setReportKind] = useState<"z-report" | "shift-report">("z-report");
   const [liveDashboard, setLiveDashboard] = useState<LiveDashboardResponse | null>(null);
+  const [frontOfHouseNotifications, setFrontOfHouseNotifications] = useState<
+    FrontOfHouseNotification[]
+  >([]);
+  const [browserNotificationPermission, setBrowserNotificationPermission] =
+    useState<NotificationPermission | "unsupported">("default");
   const [orderListMode, setOrderListMode] = useState<"active" | "history">(
     "active",
   );
@@ -826,6 +859,96 @@ export default function RestaurantsPage() {
     setLiveDashboard((await response.json()) as LiveDashboardResponse);
   }
 
+  function appendFrontOfHouseNotification(
+    type: FrontOfHouseNotification["type"],
+    eventData: {
+      course?: number;
+      message?: string;
+      orderId?: string;
+      tableId?: string | null;
+    },
+  ) {
+    if (!selectedRestaurant || !eventData.orderId || !data) {
+      return;
+    }
+
+    const table = eventData.tableId
+      ? selectedRestaurant.tables.find((candidate) => candidate.id === eventData.tableId)
+      : null;
+
+    if (
+      !data.canManageRestaurant &&
+      table?.assignedWaiterUserId &&
+      table.assignedWaiterUserId !== data.currentUser.clerkUserId
+    ) {
+      return;
+    }
+
+    const tableName = table?.name ?? "Counter / takeaway";
+    const message =
+      eventData.message ??
+      (type === "course_ready"
+        ? `Course ${eventData.course ?? ""} is ready for service.`
+        : "Kitchen needs front-of-house attention.");
+    const orderId = eventData.orderId;
+
+    setFrontOfHouseNotifications((current) => {
+      const id = `${type}:${orderId}:${eventData.tableId ?? "counter"}:${
+        eventData.course ?? "item"
+      }:${eventData.message ?? ""}`;
+      if (current.some((notification) => notification.id === id)) {
+        return current;
+      }
+
+      showBrowserServiceNotification(id, tableName, message);
+
+      const nextNotification = {
+        course: eventData.course,
+        id,
+        message,
+        orderId,
+        receivedAt: new Date().toISOString(),
+        tableId: eventData.tableId ?? null,
+        tableName,
+        type,
+      };
+      const withoutDuplicate = current.filter(
+        (notification) => notification.id !== id,
+      );
+
+      return [nextNotification, ...withoutDuplicate].slice(0, 8);
+    });
+  }
+
+  function showBrowserServiceNotification(
+    id: string,
+    tableName: string,
+    message: string,
+  ) {
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      browserNotificationPermission !== "granted"
+    ) {
+      return;
+    }
+
+    new Notification("Kitchen service alert", {
+      body: `${tableName}: ${message}`,
+      tag: id,
+    });
+  }
+
+  async function requestBrowserNotifications() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setBrowserNotificationPermission("unsupported");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setBrowserNotificationPermission(permission);
+  }
+
   async function flushQueuedRestaurantActions() {
     if (!isLoaded || !isSignedIn || typeof navigator === "undefined" || !navigator.onLine) {
       return;
@@ -938,9 +1061,72 @@ export default function RestaurantsPage() {
   ]);
 
   useEffect(() => {
+    if (!isLoaded || !isSignedIn || !selectedRestaurant) {
+      setFrontOfHouseNotifications([]);
+      return;
+    }
+
+    let isClosed = false;
+    let source: EventSource | null = null;
+    const eventNames: FrontOfHouseNotification["type"][] = [
+      "course_ready",
+      "order_alert",
+    ];
+
+    void getOrganizationToken().then((token) => {
+      if (!token || isClosed) {
+        return;
+      }
+
+      source = new EventSource(
+        `${process.env.NEXT_PUBLIC_API_URL}/events/kitchen/${
+          selectedRestaurant.id
+        }?access_token=${encodeURIComponent(token)}`,
+      );
+
+      for (const eventName of eventNames) {
+        source.addEventListener(eventName, (event) => {
+          try {
+            appendFrontOfHouseNotification(
+              eventName,
+              JSON.parse((event as MessageEvent).data) as {
+                course?: number;
+                message?: string;
+                orderId?: string;
+                tableId?: string | null;
+              },
+            );
+            void loadRestaurants();
+          } catch {
+            // Ignore malformed SSE payloads; the next poll/load will restore state.
+          }
+        });
+      }
+    });
+
+    return () => {
+      isClosed = true;
+      source?.close();
+    };
+  }, [
+    data?.canManageRestaurant,
+    data?.currentUser.clerkUserId,
+    getToken,
+    isLoaded,
+    isSignedIn,
+    organization,
+    selectedRestaurant?.id,
+    selectedRestaurant?.tables,
+  ]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
+
+    setBrowserNotificationPermission(
+      "Notification" in window ? Notification.permission : "unsupported",
+    );
 
     const refreshQueueCount = () => {
       void countQueuedRestaurantActions()
@@ -967,6 +1153,48 @@ export default function RestaurantsPage() {
       void flushQueuedRestaurantActions();
     }
   }, [getToken, isLoaded, isOnline, isSignedIn, organization]);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !selectedRestaurant) {
+      return;
+    }
+
+    const refreshTimer = window.setInterval(() => {
+      void loadRestaurants();
+    }, 10000);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [getToken, isLoaded, isSignedIn, organization, selectedRestaurant?.id]);
+
+  useEffect(() => {
+    if (!data || !selectedRestaurant) {
+      return;
+    }
+
+    for (const order of selectedRestaurant.orders) {
+      if (isCompletedOrder(order.status) || isGuestQrOrder(order)) {
+        continue;
+      }
+
+      for (const item of order.items) {
+        if (!isKitchenReadyItem(item)) {
+          continue;
+        }
+
+        appendFrontOfHouseNotification("order_alert", {
+          message: `${item.name} is ready.`,
+          orderId: order.id,
+          tableId: order.tableId,
+        });
+      }
+    }
+  }, [
+    data?.canManageRestaurant,
+    data?.currentUser.clerkUserId,
+    selectedRestaurant?.id,
+    selectedRestaurant?.orders,
+    selectedRestaurant?.tables,
+  ]);
 
   useEffect(() => {
     if (!selectedTable) {
@@ -1117,8 +1345,13 @@ export default function RestaurantsPage() {
           dietary: newMenuItemDietary,
           description: newMenuItemDescription || undefined,
           imageUrl: newMenuItemImageUrl || undefined,
+          isAvailable: newMenuItemIsAvailable,
           name: newMenuItemName,
           price: Number(newMenuItemPrice),
+          stockEnabled: newMenuItemStockEnabled,
+          currentStock: newMenuItemStockEnabled
+            ? Number(newMenuItemStock) || 0
+            : undefined,
         }),
         headers: {
           Authorization: `Bearer ${token}`,
@@ -1139,8 +1372,48 @@ export default function RestaurantsPage() {
     setNewMenuItemAllergens([]);
     setNewMenuItemDietary([]);
     setNewMenuItemImageUrl("");
+    setNewMenuItemIsAvailable(true);
     setNewMenuItemName("");
     setNewMenuItemPrice("");
+    setNewMenuItemStock("");
+    setNewMenuItemStockEnabled(false);
+    await loadRestaurants();
+  }
+
+  async function updateMenuItemStock(
+    menuItemId: string,
+    body: {
+      currentStock?: number;
+      isAvailable?: boolean;
+      stockEnabled?: boolean;
+    },
+  ) {
+    const token = await getOrganizationToken();
+    const restaurantId = selectedRestaurant?.id;
+
+    if (!token || !restaurantId) {
+      setError("Choose a restaurant before updating menu stock.");
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/menu-items/${menuItemId}/stock`,
+      {
+        body: JSON.stringify(body),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not update menu stock."));
+      return;
+    }
+
     await loadRestaurants();
   }
 
@@ -1401,6 +1674,15 @@ export default function RestaurantsPage() {
       return;
     }
 
+    const menuItem = selectedRestaurant?.menuItems.find(
+      (item) => item.id === orderMenuItemId,
+    );
+
+    if (!menuItem?.isAvailable) {
+      setError("That menu item is currently unavailable.");
+      return;
+    }
+
     setOrderItems((current) => [
       ...current,
       {
@@ -1415,6 +1697,15 @@ export default function RestaurantsPage() {
   }
 
   function addMenuItemToDraft(menuItemId: string) {
+    const menuItem = selectedRestaurant?.menuItems.find(
+      (item) => item.id === menuItemId,
+    );
+
+    if (!menuItem?.isAvailable) {
+      setError("That menu item is currently unavailable.");
+      return;
+    }
+
     setOrderItems((current) => {
       const existingIndex = current.findIndex(
         (item) => item.menuItemId === menuItemId && !item.notes,
@@ -1909,6 +2200,23 @@ export default function RestaurantsPage() {
               {isOnline ? "Online" : "Offline"}
             </span>
             <span>{queuedActionCount} queued action{queuedActionCount === 1 ? "" : "s"}</span>
+            <button
+              disabled={
+                browserNotificationPermission === "granted" ||
+                browserNotificationPermission === "unsupported"
+              }
+              onClick={requestBrowserNotifications}
+              type="button"
+            >
+              <BellRing aria-hidden="true" />
+              {browserNotificationPermission === "granted"
+                ? "Browser alerts on"
+                : browserNotificationPermission === "denied"
+                  ? "Browser alerts blocked"
+                  : browserNotificationPermission === "unsupported"
+                    ? "Browser alerts unavailable"
+                    : "Enable browser alerts"}
+            </button>
           </div>
         </div>
         <button
@@ -1922,6 +2230,48 @@ export default function RestaurantsPage() {
       </section>
 
       {error ? <div className="form-error">{error}</div> : null}
+
+      {frontOfHouseNotifications.length ? (
+        <section aria-live="polite" className="foh-notification-panel">
+          <div className="foh-notification-header">
+            <BellRing aria-hidden="true" />
+            <div>
+              <p className="eyebrow">Front of house</p>
+              <h3>
+                {frontOfHouseNotifications.length} service alert
+                {frontOfHouseNotifications.length === 1 ? "" : "s"}
+              </h3>
+            </div>
+          </div>
+          <div className="foh-notification-list">
+            {frontOfHouseNotifications.map((notification) => (
+              <article className="foh-notification-row" key={notification.id}>
+                <div>
+                  <strong>{notification.tableName}</strong>
+                  <span>{notification.message}</span>
+                  <small>
+                    {notification.type === "course_ready"
+                      ? "Course ready"
+                      : "Kitchen alert"}{" "}
+                    - {new Date(notification.receivedAt).toLocaleTimeString()}
+                  </small>
+                </div>
+                <button
+                  aria-label={`Dismiss alert for ${notification.tableName}`}
+                  onClick={() =>
+                    setFrontOfHouseNotifications((current) =>
+                      current.filter((candidate) => candidate.id !== notification.id),
+                    )
+                  }
+                  type="button"
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {data?.canManageRestaurant && offlineConflicts.length ? (
         <section className="offline-review-panel">
@@ -2687,6 +3037,37 @@ export default function RestaurantsPage() {
                         value={newMenuItemImageUrl}
                       />
                     </label>
+                    <label className="menu-toggle-label">
+                      <input
+                        checked={newMenuItemStockEnabled}
+                        onChange={(event) =>
+                          setNewMenuItemStockEnabled(event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      Track stock
+                    </label>
+                    <label>
+                      Stock
+                      <input
+                        disabled={!newMenuItemStockEnabled}
+                        min="0"
+                        onChange={(event) => setNewMenuItemStock(event.target.value)}
+                        placeholder="Optional"
+                        type="number"
+                        value={newMenuItemStock}
+                      />
+                    </label>
+                    <label className="menu-toggle-label">
+                      <input
+                        checked={newMenuItemIsAvailable}
+                        onChange={(event) =>
+                          setNewMenuItemIsAvailable(event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      Available
+                    </label>
                     <fieldset className="menu-flag-fieldset">
                       <legend>Allergens</legend>
                       <div className="menu-flag-options">
@@ -2725,7 +3106,11 @@ export default function RestaurantsPage() {
 
                   <div className="menu-grid">
                     {selectedRestaurant.menuItems.map((item) => (
-                      <div className="menu-item-card" key={item.id}>
+                      <div
+                        className="menu-item-card"
+                        data-unavailable={!item.isAvailable}
+                        key={item.id}
+                      >
                         {item.imageUrl ? (
                           <img
                             alt={item.name}
@@ -2738,7 +3123,16 @@ export default function RestaurantsPage() {
                             <Utensils />
                           </div>
                         )}
-                        <strong>{item.name}</strong>
+                        <div className="menu-item-card-heading">
+                          <strong>{item.name}</strong>
+                          {!item.isAvailable ? (
+                            <small className="stock-badge unavailable">86</small>
+                          ) : item.stockEnabled ? (
+                            <small className="stock-badge">
+                              {item.currentStock ?? 0} left
+                            </small>
+                          ) : null}
+                        </div>
                         <span>
                           {item.currency} {item.price.toFixed(2)}
                         </span>
@@ -2761,6 +3155,46 @@ export default function RestaurantsPage() {
                           </div>
                         ) : null}
                         {item.description ? <small>{item.description}</small> : null}
+                        <div className="menu-stock-actions">
+                          <button
+                            onClick={() =>
+                              updateMenuItemStock(item.id, {
+                                isAvailable: !item.isAvailable,
+                              })
+                            }
+                            type="button"
+                          >
+                            {item.isAvailable ? "Mark 86" : "Restore"}
+                          </button>
+                          {item.stockEnabled ? (
+                            <input
+                              aria-label={`Stock for ${item.name}`}
+                              min="0"
+                              onBlur={(event) =>
+                                updateMenuItemStock(item.id, {
+                                  currentStock: Number(event.target.value) || 0,
+                                  isAvailable: Number(event.target.value) > 0,
+                                  stockEnabled: true,
+                                })
+                              }
+                              type="number"
+                              defaultValue={item.currentStock ?? 0}
+                            />
+                          ) : (
+                            <button
+                              onClick={() =>
+                                updateMenuItemStock(item.id, {
+                                  currentStock: 0,
+                                  isAvailable: false,
+                                  stockEnabled: true,
+                                })
+                              }
+                              type="button"
+                            >
+                              Enable count
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                     {!selectedRestaurant.menuItems.length ? (
@@ -2842,6 +3276,8 @@ export default function RestaurantsPage() {
                         {filteredMenuItems.map((item) => (
                           <button
                             className="pos-menu-tile"
+                            data-unavailable={!item.isAvailable}
+                            disabled={!item.isAvailable}
                             key={item.id}
                             onClick={() => addMenuItemToDraft(item.id)}
                             type="button"
@@ -2857,6 +3293,13 @@ export default function RestaurantsPage() {
                             <small>
                               {item.currency} {item.price.toFixed(2)}
                             </small>
+                            {!item.isAvailable ? (
+                              <small className="stock-badge unavailable">Unavailable</small>
+                            ) : item.stockEnabled ? (
+                              <small className="stock-badge">
+                                {item.currentStock ?? 0} left
+                              </small>
+                            ) : null}
                             {item.allergens.length || item.dietary.length ? (
                               <div className="pos-menu-flags">
                                 {[...item.allergens, ...item.dietary].slice(0, 3).map((flag) => (
@@ -2972,8 +3415,13 @@ export default function RestaurantsPage() {
                         >
                           <option value="">Choose item</option>
                           {selectedRestaurant.menuItems.map((item) => (
-                            <option key={item.id} value={item.id}>
+                            <option
+                              disabled={!item.isAvailable}
+                              key={item.id}
+                              value={item.id}
+                            >
                               {item.name} - {item.currency} {item.price.toFixed(2)}
+                              {!item.isAvailable ? " - unavailable" : ""}
                             </option>
                           ))}
                         </select>

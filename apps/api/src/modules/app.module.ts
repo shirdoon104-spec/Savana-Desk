@@ -15,6 +15,7 @@ import {
 } from "./payments/payments.controller";
 import { PropertiesController } from "./properties/properties.controller";
 import { PublicMenuController } from "./restaurants/public-menu.controller";
+import { RestaurantOrderTotalsService } from "./restaurants/order-totals.service";
 import { RestaurantsController } from "./restaurants/restaurants.controller";
 import { SetupController } from "./setup/setup.controller";
 import { SyncController } from "./sync/sync.controller";
@@ -58,6 +59,7 @@ import { ClerkWebhookService } from "./webhooks/clerk-webhook.service";
     ClerkOrganizationResolver,
     ClerkWebhookService,
     IdempotencyService,
+    RestaurantOrderTotalsService,
     {
       provide: APP_INTERCEPTOR,
       useClass: IdempotencyInterceptor,

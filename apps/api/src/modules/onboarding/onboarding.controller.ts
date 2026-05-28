@@ -86,7 +86,7 @@ export class OnboardingController {
   async complete(
     @CurrentAuth() auth: ClerkAuthContext,
     @Body() body: CompleteOnboardingDto,
-  ) {
+  ): Promise<Record<string, unknown>> {
     const organization = await this.clerkOrganizations.resolve(auth);
 
     if (!organization.orgId) {

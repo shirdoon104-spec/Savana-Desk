@@ -828,7 +828,8 @@ select:focus {
   margin-top: 12px;
 }
 
-.offline-status-row span {
+.offline-status-row span,
+.offline-status-row button {
   background: #fff7ed;
   border: 1px solid #fed7aa;
   border-radius: 999px;
@@ -837,6 +838,23 @@ select:focus {
   font-size: 13px;
   font-weight: 800;
   padding: 5px 10px;
+}
+
+.offline-status-row button {
+  align-items: center;
+  cursor: pointer;
+  gap: 6px;
+  min-height: 31px;
+}
+
+.offline-status-row button:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.offline-status-row button svg {
+  height: 14px;
+  width: 14px;
 }
 
 .offline-status-row span[data-online="true"] {
@@ -925,6 +943,76 @@ select:focus {
   min-height: 40px;
   padding: 0 12px;
   white-space: nowrap;
+}
+
+.foh-notification-panel {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.foh-notification-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.foh-notification-header svg {
+  color: #0369a1;
+  height: 22px;
+  width: 22px;
+}
+
+.foh-notification-header h3 {
+  color: var(--ink-strong);
+  font-size: 18px;
+  margin: 2px 0 0;
+}
+
+.foh-notification-list {
+  display: grid;
+  gap: 10px;
+}
+
+.foh-notification-row {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  padding: 12px;
+}
+
+.foh-notification-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.foh-notification-row strong {
+  color: var(--ink-strong);
+}
+
+.foh-notification-row span,
+.foh-notification-row small {
+  color: var(--muted);
+}
+
+.foh-notification-row button {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  min-height: 38px;
+  padding: 0;
+}
+
+.foh-notification-row button svg {
+  height: 18px;
+  width: 18px;
 }
 
 .restaurant-report-panel {
@@ -1772,7 +1860,7 @@ select:focus {
   align-items: end;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   margin-top: 14px;
 }
 
@@ -1819,6 +1907,13 @@ select:focus {
   display: flex;
   gap: 6px;
   white-space: nowrap;
+}
+
+.menu-toggle-label {
+  align-items: center;
+  align-self: center;
+  display: flex !important;
+  min-height: 44px;
 }
 
 .restaurant-order-builder {
@@ -1933,6 +2028,17 @@ select:focus {
   transform: translateY(-1px);
 }
 
+.pos-menu-tile:disabled,
+.pos-menu-tile[data-unavailable="true"],
+.menu-item-card[data-unavailable="true"] {
+  opacity: 0.66;
+}
+
+.pos-menu-tile:disabled {
+  cursor: not-allowed;
+  transform: none;
+}
+
 .pos-menu-tile img,
 .pos-menu-tile > span {
   aspect-ratio: 16 / 10;
@@ -1969,12 +2075,24 @@ select:focus {
 
 .pos-menu-flags small,
 .allergen-flag,
-.dietary-flag {
+.dietary-flag,
+.stock-badge {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
   padding: 5px 7px;
+}
+
+.stock-badge {
+  background: #eef8f5;
+  color: var(--accent-strong) !important;
+  width: fit-content;
+}
+
+.stock-badge.unavailable {
+  background: #fee2e2;
+  color: #991b1b !important;
 }
 
 .allergen-flag {
@@ -2413,6 +2531,28 @@ select:focus {
   gap: 8px;
   overflow: hidden;
   padding: 12px;
+}
+
+.menu-item-card-heading,
+.menu-stock-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.menu-stock-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.menu-stock-actions button,
+.menu-stock-actions input {
+  min-height: 34px;
+}
+
+.menu-stock-actions input {
+  max-width: 88px;
 }
 
 .menu-item-image,

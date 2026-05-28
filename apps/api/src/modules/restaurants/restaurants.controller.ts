@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { Type } from "class-transformer";
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsInt,
   IsIn,
@@ -21,6 +22,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -36,6 +38,7 @@ import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import { PrismaService } from "../database/prisma.service";
 import { KitchenEventsService } from "../events/kitchen-events.service";
 import type { TenantContext } from "../tenancy/tenant-context.service";
+import { RestaurantOrderTotalsService } from "./order-totals.service";
 
 const tableStatuses = [
   "free",
@@ -164,6 +167,12 @@ class CreateMenuItemDto {
   @IsOptional()
   dietary?: DietaryFlag[];
 
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  currentStock?: number;
+
   @IsOptional()
   @IsString()
   @MaxLength(240)
@@ -183,10 +192,34 @@ class CreateMenuItemDto {
   @MaxLength(120)
   name!: string;
 
+  @IsBoolean()
+  @IsOptional()
+  stockEnabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isAvailable?: boolean;
+
   @IsNumber()
   @Min(0)
   @Type(() => Number)
   price!: number;
+}
+
+class UpdateMenuItemStockDto {
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  currentStock?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isAvailable?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  stockEnabled?: boolean;
 }
 
 class CreateKitchenStationDto {
@@ -375,6 +408,24 @@ class RecordOrderPaymentDto {
   @IsString()
   @MaxLength(160)
   reference?: string;
+}
+
+class SplitOrderDto {
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(128, { each: true })
+  @IsOptional()
+  itemIds?: string[];
+
+  @IsIn(["equal", "items"])
+  mode!: "equal" | "items";
+
+  @IsInt()
+  @Max(50)
+  @Min(2)
+  @IsOptional()
+  @Type(() => Number)
+  splitCount?: number;
 }
 
 class CancelOrderDto {
@@ -594,6 +645,7 @@ export class RestaurantsController {
   constructor(
     private readonly clerkClients: ClerkClientService,
     private readonly kitchenEvents: KitchenEventsService,
+    private readonly orderTotals: RestaurantOrderTotalsService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -695,13 +747,16 @@ export class RestaurantsController {
             allergens: item.allergens,
             categoryId: item.categoryId,
             currency: item.currency,
+            currentStock: item.currentStock,
             description: item.description,
             dietary: item.dietary,
             id: item.id,
             imageUrl: item.imageUrl,
+            isAvailable: item.isAvailable,
             kitchenStation: item.kitchenStation,
             name: item.name,
             price: Number(item.price),
+            stockEnabled: item.stockEnabled,
           })),
           name: category.name,
         })),
@@ -715,13 +770,16 @@ export class RestaurantsController {
           allergens: item.allergens,
           categoryId: item.categoryId,
           currency: item.currency,
+          currentStock: item.currentStock,
           description: item.description,
           dietary: item.dietary,
           id: item.id,
           imageUrl: item.imageUrl,
+          isAvailable: item.isAvailable,
           kitchenStation: item.kitchenStation,
           name: item.name,
           price: Number(item.price),
+          stockEnabled: item.stockEnabled,
         })),
         reservations: restaurant.reservations.map((reservation) =>
           this.serializeReservation(reservation, restaurant.tables),
@@ -773,13 +831,16 @@ export class RestaurantsController {
     allergens: string[];
     categoryId: string | null;
     currency: string;
+    currentStock: number | null;
     description: string | null;
     dietary: string[];
     id: string;
     imageUrl: string | null;
+    isAvailable: boolean;
     kitchenStation: string | null;
     name: string;
     price: number;
+    stockEnabled: boolean;
   }> {
     const restaurant = await this.findTenantRestaurant(
       context.tenant.id,
@@ -794,19 +855,28 @@ export class RestaurantsController {
       );
     }
 
+    if (body.stockEnabled && body.currentStock === undefined) {
+      throw new BadRequestException("Set the starting stock before enabling stock tracking.");
+    }
+
     const menuItem = await this.prisma.menuItem.create({
       data: {
         allergens: body.allergens ?? [],
         categoryId: body.categoryId || null,
+        currentStock: body.stockEnabled ? body.currentStock ?? 0 : null,
         currency: restaurant.property.currency,
         description: body.description?.trim() || null,
         dietary: body.dietary ?? [],
         imageUrl: body.imageUrl?.trim() || null,
+        isAvailable: body.stockEnabled
+          ? (body.currentStock ?? 0) > 0 && (body.isAvailable ?? true)
+          : body.isAvailable ?? true,
         kitchenStation: body.kitchenStation,
         name: body.name.trim(),
         price: body.price,
         propertyId: restaurant.propertyId,
         restaurantId: restaurant.id,
+        stockEnabled: body.stockEnabled ?? false,
         tenantId: context.tenant.id,
       },
     });
@@ -815,13 +885,64 @@ export class RestaurantsController {
       allergens: menuItem.allergens,
       categoryId: menuItem.categoryId,
       currency: menuItem.currency,
+      currentStock: menuItem.currentStock,
       description: menuItem.description,
       dietary: menuItem.dietary,
       id: menuItem.id,
       imageUrl: menuItem.imageUrl,
+      isAvailable: menuItem.isAvailable,
       kitchenStation: menuItem.kitchenStation,
       name: menuItem.name,
       price: Number(menuItem.price),
+      stockEnabled: menuItem.stockEnabled,
+    };
+  }
+
+  @Patch(":restaurantId/menu-items/:menuItemId/stock")
+  @RequirePermission("restaurant.manage")
+  async updateMenuItemStock(
+    @CurrentTenant() context: TenantContext,
+    @Param("restaurantId") restaurantId: string,
+    @Param("menuItemId") menuItemId: string,
+    @Body() body: UpdateMenuItemStockDto,
+  ) {
+    await this.findTenantRestaurant(context.tenant.id, restaurantId);
+    const menuItem = await this.findTenantMenuItem(
+      context.tenant.id,
+      restaurantId,
+      menuItemId,
+    );
+
+    const stockEnabled = body.stockEnabled ?? menuItem.stockEnabled;
+    const currentStock =
+      body.currentStock !== undefined
+        ? body.currentStock
+        : stockEnabled
+          ? menuItem.currentStock ?? 0
+          : null;
+
+    if (stockEnabled && currentStock === null) {
+      throw new BadRequestException("Set current stock before enabling stock tracking.");
+    }
+
+    const isAvailable = stockEnabled
+      ? Number(currentStock) > 0 && (body.isAvailable ?? true)
+      : body.isAvailable ?? menuItem.isAvailable;
+
+    const updated = await this.prisma.menuItem.update({
+      where: { id: menuItem.id },
+      data: {
+        currentStock,
+        isAvailable,
+        stockEnabled,
+      },
+    });
+
+    return {
+      currentStock: updated.currentStock,
+      id: updated.id,
+      isAvailable: updated.isAvailable,
+      stockEnabled: updated.stockEnabled,
     };
   }
 
@@ -1192,15 +1313,21 @@ export class RestaurantsController {
           where: {
             id: { in: body.items.map((item) => item.menuItemId) },
             isActive: true,
+            isAvailable: true,
             restaurantId: restaurant.id,
             tenantId: context.tenant.id,
           },
         })
       : [];
 
-    if (body.items?.length && orderItems.length !== body.items.length) {
-      throw new BadRequestException("One or more menu items were not found.");
+    if (
+      body.items?.length &&
+      orderItems.length !== uniqueMenuItemIdCount(body.items)
+    ) {
+      throw new BadRequestException("One or more menu items are unavailable.");
     }
+
+    this.assertMenuItemsHaveStock(orderItems, body.items ?? []);
 
     const itemRows = (body.items ?? []).map((item) => {
       const menuItem = orderItems.find((candidate) => candidate.id === item.menuItemId);
@@ -1234,7 +1361,12 @@ export class RestaurantsController {
             new Prisma.Decimal(0),
           )
         : new Prisma.Decimal(body.totalAmount ?? 0);
-    const totals = calculateOrderTotals(subtotal);
+    const totals = await this.orderTotals.calculateForRestaurant(
+      this.prisma,
+      context.tenant.id,
+      restaurant.id,
+      subtotal,
+    );
 
     const order = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.create({
@@ -1261,6 +1393,13 @@ export class RestaurantsController {
         },
         include: { items: true },
       });
+
+      await this.decrementMenuItemStock(
+        tx,
+        context.tenant.id,
+        restaurant.id,
+        itemRows,
+      );
 
       await tx.orderAuditLog.create({
         data: {
@@ -1675,6 +1814,14 @@ export class RestaurantsController {
         status: body.status,
         tableId: order.tableId,
       });
+      this.publishKitchenEvent(context.tenant.id, "order_alert", {
+        itemId: item.id,
+        message: `${item.name} is ready.`,
+        orderId: order.id,
+        restaurantId: order.restaurantId,
+        status: body.status,
+        tableId: order.tableId,
+      });
 
       const courseItems = updatedOrder.items.filter(
         (candidate) =>
@@ -1718,6 +1865,26 @@ export class RestaurantsController {
       orderId,
     );
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      const itemsToFire = await tx.orderItem.findMany({
+        where: {
+          course: body.course,
+          orderId: order.id,
+          status: "pending",
+          tenantId: context.tenant.id,
+        },
+        select: {
+          menuItemId: true,
+          quantity: true,
+        },
+      });
+
+      await this.decrementMenuItemStock(
+        tx,
+        context.tenant.id,
+        restaurantId,
+        itemsToFire,
+      );
+
       await tx.orderItem.updateMany({
         where: {
           course: body.course,
@@ -1821,6 +1988,125 @@ export class RestaurantsController {
     });
 
     return serializeOrder(updatedOrder);
+  }
+
+  @Post(":restaurantId/orders/:orderId/split")
+  @RequirePermission("restaurant.read")
+  async splitOrder(
+    @CurrentTenant() context: TenantContext,
+    @Param("restaurantId") restaurantId: string,
+    @Param("orderId") orderId: string,
+    @Body() body: SplitOrderDto,
+  ) {
+    if (!canTakeRestaurantPayment(context.role)) {
+      throw new BadRequestException("Your role cannot split restaurant bills.");
+    }
+
+    const order = await this.findMutableTenantOrder(
+      context.tenant.id,
+      restaurantId,
+      orderId,
+    );
+    const items = await this.prisma.orderItem.findMany({
+      orderBy: { createdAt: "asc" },
+      where: {
+        orderId: order.id,
+        status: { not: "voided" },
+        tenantId: context.tenant.id,
+      },
+    });
+    const confirmedTotal = await this.confirmedPaymentTotal(context.tenant.id, order.id);
+    const outstandingAmount = roundMoney(
+      new Prisma.Decimal(order.totalAmount).minus(confirmedTotal),
+    );
+
+    if (outstandingAmount.lessThanOrEqualTo(0)) {
+      throw new BadRequestException("Order has no outstanding balance to split.");
+    }
+
+    if (body.mode === "equal") {
+      const splitCount = body.splitCount ?? 2;
+      const baseAmount = roundMoney(outstandingAmount.div(splitCount));
+      const splits = Array.from({ length: splitCount }, (_, index) => {
+        const amount =
+          index === splitCount - 1
+            ? outstandingAmount.minus(baseAmount.mul(splitCount - 1))
+            : baseAmount;
+
+        return {
+          amount: Number(roundMoney(amount)),
+          label: `Split ${index + 1}`,
+        };
+      });
+
+      return {
+        currency: order.currency,
+        mode: "equal",
+        orderId: order.id,
+        outstandingAmount: Number(outstandingAmount),
+        splitCount,
+        splits,
+        totalSplitAmount: Number(outstandingAmount),
+      };
+    }
+
+    const itemIds = Array.from(new Set(body.itemIds ?? []));
+
+    if (!itemIds.length) {
+      throw new BadRequestException("Item split requires at least one order item.");
+    }
+
+    const selectedItems = items.filter((item) => itemIds.includes(item.id));
+
+    if (selectedItems.length !== itemIds.length) {
+      throw new BadRequestException("One or more split items were not found on this order.");
+    }
+
+    const activeSubtotal = items.reduce(
+      (total, item) => total.plus(item.totalPrice),
+      new Prisma.Decimal(0),
+    );
+    const selectedSubtotal = selectedItems.reduce(
+      (total, item) => total.plus(item.totalPrice),
+      new Prisma.Decimal(0),
+    );
+
+    if (activeSubtotal.lessThanOrEqualTo(0) || selectedSubtotal.lessThanOrEqualTo(0)) {
+      throw new BadRequestException("Selected items cannot be split.");
+    }
+
+    const selectedAmount = roundMoney(
+      outstandingAmount.mul(selectedSubtotal).div(activeSubtotal),
+    );
+    const remainingAmount = roundMoney(outstandingAmount.minus(selectedAmount));
+
+    return {
+      currency: order.currency,
+      mode: "items",
+      orderId: order.id,
+      outstandingAmount: Number(outstandingAmount),
+      splits: [
+        {
+          amount: Number(selectedAmount),
+          itemIds,
+          items: selectedItems.map((item) => ({
+            id: item.id,
+            name: item.name,
+            quantity: item.quantity,
+            totalPrice: Number(item.totalPrice),
+          })),
+          label: "Selected items",
+        },
+        {
+          amount: Number(remainingAmount),
+          itemIds: items
+            .filter((item) => !itemIds.includes(item.id))
+            .map((item) => item.id),
+          label: "Remaining bill",
+        },
+      ],
+      totalSplitAmount: Number(outstandingAmount),
+    };
   }
 
   @Post(":restaurantId/orders/:orderId/pay")
@@ -2175,6 +2461,28 @@ export class RestaurantsController {
     }
 
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      const itemsToSend =
+        body.status === "sent"
+          ? await tx.orderItem.findMany({
+              where: {
+                orderId: order.id,
+                status: "pending",
+                tenantId: context.tenant.id,
+              },
+              select: {
+                menuItemId: true,
+                quantity: true,
+              },
+            })
+          : [];
+
+      await this.decrementMenuItemStock(
+        tx,
+        context.tenant.id,
+        restaurantId,
+        itemsToSend,
+      );
+
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
         data: {
@@ -2332,14 +2640,17 @@ export class RestaurantsController {
       where: {
         id: { in: items.map((item) => item.menuItemId) },
         isActive: true,
+        isAvailable: true,
         restaurantId,
         tenantId,
       },
     });
 
-    if (menuItems.length !== items.length) {
-      throw new BadRequestException("One or more menu items were not found.");
+    if (menuItems.length !== uniqueMenuItemIdCount(items)) {
+      throw new BadRequestException("One or more menu items are unavailable.");
     }
+
+    this.assertMenuItemsHaveStock(menuItems, items);
 
     return items.map((item) => {
       const menuItem = menuItems.find((candidate) => candidate.id === item.menuItemId);
@@ -2383,13 +2694,14 @@ export class RestaurantsController {
       where: {
         id: { in: items.map((item) => item.menuItemId) },
         isActive: true,
+        isAvailable: true,
         restaurantId,
         tenantId,
       },
     });
 
-    if (menuItems.length !== items.length) {
-      throw new BadRequestException("One or more reservation menu items were not found.");
+    if (menuItems.length !== uniqueMenuItemIdCount(items)) {
+      throw new BadRequestException("One or more reservation menu items are unavailable.");
     }
 
     return items.map((item) => {
@@ -2418,6 +2730,7 @@ export class RestaurantsController {
     tx: Prisma.TransactionClient,
     order: {
       id: string;
+      restaurantId: string;
       tenantId: string;
     },
   ) {
@@ -2446,7 +2759,13 @@ export class RestaurantsController {
       (total, discount) => total.plus(discount.amount),
       new Prisma.Decimal(0),
     );
-    const totals = calculateOrderTotals(subtotal, discountAmount);
+    const totals = await this.orderTotals.calculateForRestaurant(
+      tx,
+      order.tenantId,
+      order.restaurantId,
+      subtotal,
+      discountAmount,
+    );
 
     return tx.order.update({
       where: { id: order.id },
@@ -2595,6 +2914,130 @@ export class RestaurantsController {
     }
 
     return category;
+  }
+
+  private async findTenantMenuItem(
+    tenantId: string,
+    restaurantId: string,
+    menuItemId: string,
+  ) {
+    const menuItem = await this.prisma.menuItem.findFirst({
+      where: {
+        id: menuItemId,
+        isActive: true,
+        restaurantId,
+        tenantId,
+      },
+    });
+
+    if (!menuItem) {
+      throw new BadRequestException("Menu item was not found.");
+    }
+
+    return menuItem;
+  }
+
+  private assertMenuItemsHaveStock(
+    menuItems: Array<{
+      currentStock: number | null;
+      id: string;
+      isAvailable: boolean;
+      name: string;
+      stockEnabled: boolean;
+    }>,
+    requestedItems: Array<{
+      menuItemId: string;
+      quantity: number;
+    }>,
+  ) {
+    const requestedQuantities = aggregateMenuItemQuantities(requestedItems);
+
+    for (const menuItem of menuItems) {
+      const requestedQuantity = requestedQuantities.get(menuItem.id) ?? 0;
+
+      if (!menuItem.isAvailable) {
+        throw new BadRequestException(`${menuItem.name} is currently unavailable.`);
+      }
+
+      if (!menuItem.stockEnabled) {
+        continue;
+      }
+
+      if (menuItem.currentStock === null) {
+        throw new BadRequestException(`${menuItem.name} stock has not been configured.`);
+      }
+
+      if (menuItem.currentStock < requestedQuantity) {
+        throw new BadRequestException(
+          `${menuItem.name} only has ${menuItem.currentStock} left.`,
+        );
+      }
+    }
+  }
+
+  private async decrementMenuItemStock(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    restaurantId: string,
+    items: Array<{
+      menuItemId: string | null;
+      quantity: number;
+    }>,
+  ) {
+    const requestedQuantities = aggregateMenuItemQuantities(
+      items.filter((item): item is { menuItemId: string; quantity: number } =>
+        Boolean(item.menuItemId),
+      ),
+    );
+
+    for (const [menuItemId, quantity] of requestedQuantities) {
+      const updated = await tx.menuItem.updateMany({
+        where: {
+          currentStock: { gte: quantity },
+          id: menuItemId,
+          isActive: true,
+          isAvailable: true,
+          restaurantId,
+          stockEnabled: true,
+          tenantId,
+        },
+        data: {
+          currentStock: { decrement: quantity },
+        },
+      });
+
+      if (updated.count === 0) {
+        const menuItem = await tx.menuItem.findFirst({
+          where: {
+            id: menuItemId,
+            restaurantId,
+            tenantId,
+          },
+          select: {
+            currentStock: true,
+            name: true,
+            stockEnabled: true,
+          },
+        });
+
+        if (menuItem?.stockEnabled) {
+          throw new BadRequestException(
+            `${menuItem.name} does not have enough stock left.`,
+          );
+        }
+      }
+
+      await tx.menuItem.updateMany({
+        where: {
+          currentStock: { lte: 0 },
+          id: menuItemId,
+          restaurantId,
+          stockEnabled: true,
+          tenantId,
+        },
+        data: { isAvailable: false },
+      });
+    }
   }
 
   private async listAssignableWaiters(tenantId: string) {
@@ -2762,6 +3205,7 @@ export class RestaurantsController {
     data: {
       course?: number;
       itemId?: string;
+      message?: string;
       orderId: string;
       restaurantId: string;
       status?: string;
@@ -2802,28 +3246,6 @@ function formatDiscountLabel(discount: ApplyDiscountDto) {
   }
 
   return "Discount";
-}
-
-function calculateOrderTotals(
-  subtotal: Prisma.Decimal,
-  requestedDiscountAmount = new Prisma.Decimal(0),
-) {
-  const taxRate = readDecimalEnv("RESTAURANT_TAX_RATE");
-  const serviceChargeRate = readDecimalEnv("RESTAURANT_SERVICE_CHARGE_RATE");
-  const discountAmount = Prisma.Decimal.min(requestedDiscountAmount, subtotal);
-  const serviceChargeAmount = roundMoney(subtotal.minus(discountAmount).mul(serviceChargeRate));
-  const taxableBase = subtotal.plus(serviceChargeAmount).minus(discountAmount);
-  const taxAmount = roundMoney(taxableBase.mul(taxRate));
-
-  return {
-    discountAmount,
-    serviceChargeAmount,
-    serviceChargeRate,
-    subtotal,
-    taxAmount,
-    taxRate,
-    totalAmount: roundMoney(taxableBase.plus(taxAmount)),
-  };
 }
 
 function readDecimalEnv(name: string) {
@@ -2952,4 +3374,24 @@ function deriveOrderStatusFromItems(items: Array<{ status: string }>): OrderStat
   }
 
   return "sent";
+}
+
+function aggregateMenuItemQuantities(
+  items: Array<{
+    menuItemId: string;
+    quantity: number;
+  }>,
+) {
+  return items.reduce((quantities, item) => {
+    quantities.set(
+      item.menuItemId,
+      (quantities.get(item.menuItemId) ?? 0) + item.quantity,
+    );
+
+    return quantities;
+  }, new Map<string, number>());
+}
+
+function uniqueMenuItemIdCount(items: Array<{ menuItemId: string }>) {
+  return new Set(items.map((item) => item.menuItemId)).size;
 }

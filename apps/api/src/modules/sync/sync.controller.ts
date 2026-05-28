@@ -14,6 +14,7 @@ import { CurrentTenant } from "../auth/current-tenant.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import { PrismaService } from "../database/prisma.service";
+import { RestaurantOrderTotalsService } from "../restaurants/order-totals.service";
 import type { TenantContext } from "../tenancy/tenant-context.service";
 
 const terminalOfflineStatuses = ["synced", "conflicted", "rejected"] as const;
@@ -28,7 +29,10 @@ const offlinePaymentMethods = [
 @Controller("sync")
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class SyncController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly orderTotals: RestaurantOrderTotalsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get("conflicts")
   @RequirePermission("restaurant.manage")
@@ -366,14 +370,17 @@ export class SyncController {
       where: {
         id: { in: payload.items.map((item) => item.menuItemId) },
         isActive: true,
+        isAvailable: true,
         restaurantId: restaurant.id,
         tenantId: context.tenant.id,
       },
     });
 
-    if (menuItems.length !== payload.items.length) {
-      throw new BadRequestException("One or more offline menu items were not found.");
+    if (menuItems.length !== uniqueMenuItemIdCount(payload.items)) {
+      throw new OfflineConflictError("One or more offline menu items are no longer available.");
     }
+
+    assertMenuItemsHaveStock(menuItems, payload.items);
 
     const itemRows = payload.items.map((item) => {
       const menuItem = menuItems.find((candidate) => candidate.id === item.menuItemId);
@@ -404,7 +411,12 @@ export class SyncController {
       (total, item) => total.plus(item.totalPrice),
       new Prisma.Decimal(0),
     );
-    const totals = calculateOrderTotals(subtotal);
+    const totals = await this.orderTotals.calculateForRestaurant(
+      this.prisma,
+      context.tenant.id,
+      restaurant.id,
+      subtotal,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.create({
@@ -426,6 +438,13 @@ export class SyncController {
           totalAmount: totals.totalAmount,
         },
       });
+
+      await decrementMenuItemStock(
+        tx,
+        context.tenant.id,
+        restaurant.id,
+        itemRows,
+      );
 
       await tx.orderAuditLog.create({
         data: {
@@ -634,7 +653,13 @@ export class SyncController {
         },
       });
 
-      const totals = await recalculateOrderTotals(tx, item.orderId, context.tenant.id);
+      const totals = await recalculateOrderTotals(
+        tx,
+        this.orderTotals,
+        item.orderId,
+        item.order.restaurantId,
+        context.tenant.id,
+      );
 
       await tx.order.update({
         where: { id: item.orderId },
@@ -783,6 +808,129 @@ export class SyncController {
 
 class OfflineConflictError extends Error {}
 
+function assertMenuItemsHaveStock(
+  menuItems: Array<{
+    currentStock: number | null;
+    id: string;
+    isAvailable: boolean;
+    name: string;
+    stockEnabled: boolean;
+  }>,
+  requestedItems: Array<{
+    menuItemId: string;
+    quantity: number;
+  }>,
+) {
+  const requestedQuantities = aggregateMenuItemQuantities(requestedItems);
+
+  for (const menuItem of menuItems) {
+    const requestedQuantity = requestedQuantities.get(menuItem.id) ?? 0;
+
+    if (!menuItem.isAvailable) {
+      throw new OfflineConflictError(`${menuItem.name} is currently unavailable.`);
+    }
+
+    if (!menuItem.stockEnabled) {
+      continue;
+    }
+
+    if (menuItem.currentStock === null) {
+      throw new OfflineConflictError(`${menuItem.name} stock has not been configured.`);
+    }
+
+    if (menuItem.currentStock < requestedQuantity) {
+      throw new OfflineConflictError(
+        `${menuItem.name} only has ${menuItem.currentStock} left.`,
+      );
+    }
+  }
+}
+
+async function decrementMenuItemStock(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  restaurantId: string,
+  items: Array<{
+    menuItemId: string | null;
+    quantity: number;
+  }>,
+) {
+  const requestedQuantities = aggregateMenuItemQuantities(
+    items.filter((item): item is { menuItemId: string; quantity: number } =>
+      Boolean(item.menuItemId),
+    ),
+  );
+
+  for (const [menuItemId, quantity] of requestedQuantities) {
+    const updated = await tx.menuItem.updateMany({
+      where: {
+        currentStock: { gte: quantity },
+        id: menuItemId,
+        isActive: true,
+        isAvailable: true,
+        restaurantId,
+        stockEnabled: true,
+        tenantId,
+      },
+      data: {
+        currentStock: { decrement: quantity },
+      },
+    });
+
+    if (updated.count === 0) {
+      const menuItem = await tx.menuItem.findFirst({
+        where: {
+          id: menuItemId,
+          restaurantId,
+          tenantId,
+        },
+        select: {
+          currentStock: true,
+          name: true,
+          stockEnabled: true,
+        },
+      });
+
+      if (menuItem?.stockEnabled) {
+        throw new OfflineConflictError(
+          `${menuItem.name} does not have enough stock left.`,
+        );
+      }
+    }
+
+    await tx.menuItem.updateMany({
+      where: {
+        currentStock: { lte: 0 },
+        id: menuItemId,
+        restaurantId,
+        stockEnabled: true,
+        tenantId,
+      },
+      data: { isAvailable: false },
+    });
+  }
+}
+
+function aggregateMenuItemQuantities(
+  items: Array<{
+    menuItemId: string;
+    quantity: number;
+  }>,
+) {
+  return items.reduce((quantities, item) => {
+    quantities.set(
+      item.menuItemId,
+      (quantities.get(item.menuItemId) ?? 0) + item.quantity,
+    );
+
+    return quantities;
+  }, new Map<string, number>());
+}
+
+function uniqueMenuItemIdCount(items: Array<{ menuItemId: string }>) {
+  return new Set(items.map((item) => item.menuItemId)).size;
+}
+
 function parseCreateOrderPayload(payload: Prisma.JsonValue) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new BadRequestException("Offline order payload is invalid.");
@@ -920,7 +1068,9 @@ function parseTransferTablePayload(payload: Prisma.JsonValue) {
 
 async function recalculateOrderTotals(
   tx: Prisma.TransactionClient,
+  orderTotals: RestaurantOrderTotalsService,
   orderId: string,
+  restaurantId: string,
   tenantId: string,
 ) {
   const [items, discounts] = await Promise.all([
@@ -949,53 +1099,19 @@ async function recalculateOrderTotals(
     new Prisma.Decimal(0),
   );
 
-  return calculateOrderTotals(subtotal, discountAmount);
-}
-
-function calculateOrderTotals(
-  subtotal: Prisma.Decimal,
-  requestedDiscountAmount = new Prisma.Decimal(0),
-) {
-  const taxRate = readDecimalEnv("RESTAURANT_TAX_RATE");
-  const serviceChargeRate = readDecimalEnv("RESTAURANT_SERVICE_CHARGE_RATE");
-  const discountAmount = Prisma.Decimal.min(requestedDiscountAmount, subtotal);
-  const serviceChargeAmount = roundMoney(subtotal.minus(discountAmount).mul(serviceChargeRate));
-  const taxableBase = subtotal.plus(serviceChargeAmount).minus(discountAmount);
-  const taxAmount = roundMoney(taxableBase.mul(taxRate));
-
-  return {
-    discountAmount,
-    serviceChargeAmount,
-    serviceChargeRate,
+  return orderTotals.calculateForRestaurant(
+    tx,
+    tenantId,
+    restaurantId,
     subtotal,
-    taxAmount,
-    taxRate,
-    totalAmount: roundMoney(taxableBase.plus(taxAmount)),
-  };
-}
-
-function readDecimalEnv(name: string) {
-  const value = process.env[name];
-
-  if (!value) {
-    return new Prisma.Decimal(0);
-  }
-
-  try {
-    return new Prisma.Decimal(value);
-  } catch {
-    return new Prisma.Decimal(0);
-  }
+    discountAmount,
+  );
 }
 
 function readIntegerEnv(name: string, fallback: number) {
   const value = Number.parseInt(process.env[name] ?? "", 10);
 
   return Number.isInteger(value) && value >= 0 ? value : fallback;
-}
-
-function roundMoney(value: Prisma.Decimal) {
-  return value.toDecimalPlaces(2);
 }
 
 function toPrismaJson(value: unknown): Prisma.InputJsonValue {

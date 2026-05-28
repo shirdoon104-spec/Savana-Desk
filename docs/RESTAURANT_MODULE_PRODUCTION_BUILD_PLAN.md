@@ -330,7 +330,7 @@ Events:
 
 Every endpoint must enforce tenant scope, role permissions, server-side recalculation, and audit logging.
 
-Status as of 2026-05-25: Task 2.1 backend item management endpoints are implemented under the tenant-scoped restaurant routes. Add/update/remove/void item actions enforce mutable order state, role permissions, item status rules, server-side recalculation, and audit logging. Task 2.2 core backend bill actions are partially implemented: fire course, apply discount, record manual payment, close, cancel, and transfer table. Split billing and room-charge folio posting remain.
+Status as of 2026-05-28: Task 2.1 backend item management endpoints are implemented under the tenant-scoped restaurant routes. Add/update/remove/void item actions enforce mutable order state, role permissions, item status rules, server-side recalculation, and audit logging. Task 2.2 core backend bill actions are partially implemented: fire course, apply discount, split bill preview, record manual payment, close, cancel, and transfer table. Room-charge folio posting remains.
 
 ### Task 2.1 - Item Management Endpoints
 
@@ -366,6 +366,8 @@ Validation:
 - Cannot transfer to an occupied table unless merging is explicitly implemented and audited.
 
 ### Task 2.3 - Tax and Charge Calculation Service
+
+Status as of 2026-05-28: implemented as a shared API totals service. Restaurant orders, public QR orders, and offline replay now use the same server-side calculation path. The service resolves tax and service charge rates from restaurant config first, then property config, then environment defaults, snapshots those rates on the order, caps discounts at subtotal, rounds at the currency minor-unit boundary, and keeps client-sent totals out of persisted order totals. Property and restaurant tax/service-charge config fields have been added with a reviewed migration.
 
 Build a server-side calculation service:
 
@@ -693,6 +695,8 @@ Add walk-in waitlist and table suggestions after the floor map is stable.
 
 ### Task 8.4 - Menu Item Stock and 86 List
 
+Status as of 2026-05-28: first slice implemented. `MenuItem` now stores stock tracking, current stock, and availability fields with a reviewed migration. Restaurant managers can create tracked-stock items, mark items 86/unavailable, restore availability, and adjust stock from POS menu setup. Staff POS and public QR menus block unavailable items, public QR menus hide unavailable items, and sent/fired staff orders decrement tracked stock atomically, auto-marking items unavailable when stock reaches zero. Offline order replay now conflicts when stock is no longer available. More granular stock audit events and stock restoration history remain future work.
+
 Add to `MenuItem`:
 
 - `stockEnabled Boolean`
@@ -707,6 +711,8 @@ Rules:
 - Manager can restore stock or disable item.
 
 ### Task 8.5 - Front-of-House Notifications
+
+Status as of 2026-05-28: implemented as an in-app SSE and browser notification slice. The restaurant POS now subscribes to the tenant-scoped kitchen event stream for the selected restaurant, filters service alerts to the current waiter's assigned tables unless the user is a manager, and displays dismissible front-of-house alerts for `course_ready` and `order_alert`. Kitchen item-ready updates now emit `order_alert` with a waiter-facing message, while existing `course_ready` events continue to fire when all items in a course are ready. The POS also derives alerts from refreshed order state so missed SSE events still surface, and users can opt in to browser notifications from the restaurant header.
 
 - Waiter device subscribes to assigned table events.
 - Events: `course_ready`, `order_alert`.

@@ -34,12 +34,15 @@ interface PublicMenuItem {
   allergens: string[];
   categoryId: string | null;
   currency: string;
+  currentStock: number | null;
   description: string | null;
   dietary: string[];
   id: string;
   imageUrl: string | null;
+  isAvailable: boolean;
   name: string;
   price: number;
+  stockEnabled: boolean;
 }
 
 interface PublicOrderResponse {
@@ -250,6 +253,11 @@ export default function PublicMenuPage() {
                         <strong>
                           {item.currency} {item.price.toFixed(2)}
                         </strong>
+                        {item.stockEnabled ? (
+                          <small className="stock-badge">
+                            {item.currentStock ?? 0} left
+                          </small>
+                        ) : null}
                       </div>
                       <div className="public-quantity-controls">
                         <button
@@ -305,6 +313,11 @@ export default function PublicMenuPage() {
                       <strong>
                         {item.currency} {item.price.toFixed(2)}
                       </strong>
+                      {item.stockEnabled ? (
+                        <small className="stock-badge">
+                          {item.currentStock ?? 0} left
+                        </small>
+                      ) : null}
                     </div>
                     <div className="public-quantity-controls">
                       <button

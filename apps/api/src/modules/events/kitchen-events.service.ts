@@ -4,6 +4,7 @@ import { Observable, Subject } from "rxjs";
 export interface KitchenEventPayload {
   course?: number;
   itemId?: string;
+  message?: string;
   orderId: string;
   restaurantId: string;
   status?: string;

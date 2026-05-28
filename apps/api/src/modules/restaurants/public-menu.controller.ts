@@ -19,6 +19,7 @@ import {
 } from "class-validator";
 import { Prisma } from "@rayaan/database";
 import { PrismaService } from "../database/prisma.service";
+import { RestaurantOrderTotalsService } from "./order-totals.service";
 
 class PublicOrderItemDto {
   @IsString()
@@ -54,7 +55,10 @@ class CreatePublicOrderDto {
 
 @Controller("public/menu")
 export class PublicMenuController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly orderTotals: RestaurantOrderTotalsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get(":restaurantId/:tableId")
   async getMenu(
@@ -139,14 +143,17 @@ export class PublicMenuController {
       where: {
         id: { in: body.items.map((item) => item.menuItemId) },
         isActive: true,
+        isAvailable: true,
         restaurantId: restaurant.id,
         tenantId: restaurant.tenantId,
       },
     });
 
-    if (menuItems.length !== body.items.length) {
-      throw new BadRequestException("One or more menu items were not found.");
+    if (menuItems.length !== uniqueMenuItemIdCount(body.items)) {
+      throw new BadRequestException("One or more menu items are unavailable.");
     }
+
+    assertMenuItemsHaveStock(menuItems, body.items);
 
     const itemRows = body.items.map((item) => {
       const menuItem = menuItems.find((candidate) => candidate.id === item.menuItemId);
@@ -176,7 +183,12 @@ export class PublicMenuController {
       (total, item) => total.plus(item.totalPrice),
       new Prisma.Decimal(0),
     );
-    const totals = calculateOrderTotals(subtotal);
+    const totals = await this.orderTotals.calculateForRestaurant(
+      this.prisma,
+      restaurant.tenantId,
+      restaurant.id,
+      subtotal,
+    );
 
     const order = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.create({
@@ -246,7 +258,7 @@ export class PublicMenuController {
               include: {
                 items: {
                   orderBy: { createdAt: "asc" },
-                  where: { isActive: true },
+                  where: { isActive: true, isAvailable: true },
                 },
               },
               orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -254,7 +266,7 @@ export class PublicMenuController {
             },
             menuItems: {
               orderBy: { createdAt: "asc" },
-              where: { isActive: true },
+              where: { isActive: true, isAvailable: true },
             },
             property: true,
           },
@@ -274,23 +286,29 @@ function serializePublicMenuItem(item: {
   allergens: string[];
   categoryId: string | null;
   currency: string;
+  currentStock: number | null;
   description: string | null;
   dietary: string[];
   id: string;
   imageUrl: string | null;
+  isAvailable: boolean;
   name: string;
   price: Prisma.Decimal;
+  stockEnabled: boolean;
 }) {
   return {
     allergens: item.allergens,
     categoryId: item.categoryId,
     currency: item.currency,
+    currentStock: item.currentStock,
     description: item.description,
     dietary: item.dietary,
     id: item.id,
     imageUrl: item.imageUrl,
+    isAvailable: item.isAvailable,
     name: item.name,
     price: Number(item.price),
+    stockEnabled: item.stockEnabled,
   };
 }
 
@@ -320,46 +338,55 @@ function serializePublicOrder(order: {
   };
 }
 
-function calculateOrderTotals(
-  subtotal: Prisma.Decimal,
-  requestedDiscountAmount = new Prisma.Decimal(0),
-) {
-  const taxRate = readDecimalEnv("RESTAURANT_TAX_RATE");
-  const serviceChargeRate = readDecimalEnv("RESTAURANT_SERVICE_CHARGE_RATE");
-  const discountAmount = Prisma.Decimal.min(requestedDiscountAmount, subtotal);
-  const serviceChargeAmount = roundMoney(subtotal.minus(discountAmount).mul(serviceChargeRate));
-  const taxableBase = subtotal.plus(serviceChargeAmount).minus(discountAmount);
-  const taxAmount = roundMoney(taxableBase.mul(taxRate));
-
-  return {
-    discountAmount,
-    serviceChargeAmount,
-    serviceChargeRate,
-    subtotal,
-    taxAmount,
-    taxRate,
-    totalAmount: roundMoney(taxableBase.plus(taxAmount)),
-  };
-}
-
-function readDecimalEnv(name: string) {
-  const value = process.env[name];
-
-  if (!value) {
-    return new Prisma.Decimal(0);
-  }
-
-  try {
-    return new Prisma.Decimal(value);
-  } catch {
-    return new Prisma.Decimal(0);
-  }
-}
-
-function roundMoney(value: Prisma.Decimal) {
-  return value.toDecimalPlaces(2);
-}
-
 function toPrismaJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
+}
+
+function assertMenuItemsHaveStock(
+  menuItems: Array<{
+    currentStock: number | null;
+    id: string;
+    isAvailable: boolean;
+    name: string;
+    stockEnabled: boolean;
+  }>,
+  requestedItems: Array<{
+    menuItemId: string;
+    quantity: number;
+  }>,
+) {
+  const requestedQuantities = requestedItems.reduce((quantities, item) => {
+    quantities.set(
+      item.menuItemId,
+      (quantities.get(item.menuItemId) ?? 0) + item.quantity,
+    );
+
+    return quantities;
+  }, new Map<string, number>());
+
+  for (const menuItem of menuItems) {
+    const requestedQuantity = requestedQuantities.get(menuItem.id) ?? 0;
+
+    if (!menuItem.isAvailable) {
+      throw new BadRequestException(`${menuItem.name} is currently unavailable.`);
+    }
+
+    if (!menuItem.stockEnabled) {
+      continue;
+    }
+
+    if (menuItem.currentStock === null) {
+      throw new BadRequestException(`${menuItem.name} stock has not been configured.`);
+    }
+
+    if (menuItem.currentStock < requestedQuantity) {
+      throw new BadRequestException(
+        `${menuItem.name} only has ${menuItem.currentStock} left.`,
+      );
+    }
+  }
+}
+
+function uniqueMenuItemIdCount(items: Array<{ menuItemId: string }>) {
+  return new Set(items.map((item) => item.menuItemId)).size;
 }

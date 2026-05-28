@@ -242,7 +242,7 @@ export class PropertiesController {
   async create(
     @CurrentTenant() context: TenantContext,
     @Body() body: CreatePropertyDto,
-  ) {
+  ): Promise<Record<string, unknown>> {
     const name = body.name?.trim();
     const city = body.city?.trim();
     const currency = body.currency?.trim().toUpperCase() || "USD";

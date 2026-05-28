@@ -67,6 +67,8 @@ model Property {
   roomCount   Int?
   timezone    String       @default("Africa/Mogadishu")
   currency    String       @default("USD")
+  taxRate     Decimal?
+  serviceChargeRate Decimal?
   tenant      Tenant       @relation(fields: [tenantId], references: [id])
   rooms       Room[]
   stays       Stay[]
@@ -83,6 +85,8 @@ model Restaurant {
   propertyId String
   name       String
   serviceStyle String?
+  taxRate    Decimal?
+  serviceChargeRate Decimal?
   property   Property          @relation(fields: [propertyId], references: [id])
   menuCategories MenuCategory[]
   menuItems  MenuItem[]
@@ -338,6 +342,9 @@ model MenuItem {
   kitchenStation KitchenStationType?
   allergens    String[]      @default([])
   dietary      String[]      @default([])
+  stockEnabled Boolean       @default(false)
+  currentStock Int?
+  isAvailable  Boolean       @default(true)
   price        Decimal
   currency     String        @default("USD")
   isActive     Boolean       @default(true)
@@ -349,6 +356,7 @@ model MenuItem {
   updatedAt    DateTime      @updatedAt
 
   @@index([tenantId, propertyId, restaurantId, isActive])
+  @@index([tenantId, restaurantId, isAvailable])
   @@index([categoryId])
 }
 
