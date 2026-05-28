@@ -23,6 +23,7 @@ export function TenantSummary() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
   const [context, setContext] = useState<TenantContext | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadTenantContext() {
@@ -38,20 +39,37 @@ export function TenantSummary() {
         return;
       }
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/tenancy/context`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/tenancy/context`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
 
-      if (response.ok) {
-        setContext((await response.json()) as TenantContext);
+        if (response.ok) {
+          setContext((await response.json()) as TenantContext);
+          setError(null);
+        } else {
+          setError("Could not load workspace context.");
+        }
+      } catch {
+        setError("Could not reach the Rayaan API. Check that the API is running.");
       }
     }
 
     void loadTenantContext();
   }, [getToken, isLoaded, isSignedIn, organization]);
+
+  if (error) {
+    return (
+      <section className="notice-panel dashboard-empty">
+        <p className="eyebrow">Workspace</p>
+        <h2>API unavailable</h2>
+        <p>{error}</p>
+      </section>
+    );
+  }
 
   if (!context?.tenantResolved || !context.tenant) {
     return (

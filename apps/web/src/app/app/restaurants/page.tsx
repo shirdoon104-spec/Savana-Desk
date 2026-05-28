@@ -165,6 +165,20 @@ interface PaymentInitiationResponse {
   status: string;
 }
 
+interface SplitOrderPreview {
+  currency: string;
+  mode: "equal" | "items";
+  orderId: string;
+  outstandingAmount: number;
+  splitCount?: number;
+  splits: Array<{
+    amount: number;
+    itemIds?: string[];
+    label: string;
+  }>;
+  totalSplitAmount: number;
+}
+
 interface ActiveStayOption {
   checkoutDate: string | null;
   folioId: string;
@@ -418,6 +432,7 @@ export default function RestaurantsPage() {
   const [paymentSplitMode, setPaymentSplitMode] = useState<"equal" | "items">("equal");
   const [paymentSplitCount, setPaymentSplitCount] = useState("1");
   const [paymentSplitItemIds, setPaymentSplitItemIds] = useState<string[]>([]);
+  const [isPreviewingSplit, setIsPreviewingSplit] = useState(false);
   const [paymentReference, setPaymentReference] = useState("");
   const [cashTendered, setCashTendered] = useState("");
   const [staySearch, setStaySearch] = useState("");
@@ -434,6 +449,7 @@ export default function RestaurantsPage() {
   const [voidReason, setVoidReason] = useState("");
   const [transferTableId, setTransferTableId] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  const [managerConfirmation, setManagerConfirmation] = useState("");
   const [isOnline, setIsOnline] = useState(true);
   const [queuedActionCount, setQueuedActionCount] = useState(0);
   const [offlineConflicts, setOfflineConflicts] = useState<OfflineConflictAction[]>([]);
@@ -1834,8 +1850,9 @@ export default function RestaurantsPage() {
     setPaymentMethod("paystack");
     setPaymentAmount(outstanding.toFixed(2));
     setPaymentSplitMode("equal");
-    setPaymentSplitCount("1");
+    setPaymentSplitCount("2");
     setPaymentSplitItemIds([]);
+    setIsPreviewingSplit(false);
     setPaymentReference("");
     setCashTendered("");
     setStaySearch("");
@@ -1844,9 +1861,62 @@ export default function RestaurantsPage() {
     setPaymentError(null);
   }
 
-  function applyEqualSplit() {
-    setPaymentAmount(splitAmount.toFixed(2));
+  async function previewOrderSplit(body: {
+    itemIds?: string[];
+    mode: "equal" | "items";
+    splitCount?: number;
+  }) {
+    if (!selectedRestaurant || !paymentDrawerOrder) {
+      throw new Error("Choose an open order before splitting payment.");
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      throw new Error("Select or create a workspace organization before splitting payment.");
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${paymentDrawerOrder.id}/split`,
+      {
+        body: JSON.stringify(body),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(await readApiMessage(response, "Could not preview split bill."));
+    }
+
+    return (await response.json()) as SplitOrderPreview;
+  }
+
+  async function applyEqualSplit() {
+    const splitCount = Number(paymentSplitCount);
+
+    if (!Number.isInteger(splitCount) || splitCount < 2) {
+      setPaymentError("Equal split requires at least 2 guests.");
+      return;
+    }
+
+    setIsPreviewingSplit(true);
     setPaymentError(null);
+
+    try {
+      const preview = await previewOrderSplit({
+        mode: "equal",
+        splitCount,
+      });
+      setPaymentAmount((preview.splits[0]?.amount ?? 0).toFixed(2));
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Could not preview split bill.");
+    } finally {
+      setIsPreviewingSplit(false);
+    }
   }
 
   function toggleSplitItem(itemId: string) {
@@ -1858,14 +1928,26 @@ export default function RestaurantsPage() {
     setPaymentError(null);
   }
 
-  function applyItemSplit() {
+  async function applyItemSplit() {
     if (itemSplitAmount <= 0) {
       setPaymentError("Choose at least one item for item split.");
       return;
     }
 
-    setPaymentAmount(Math.min(itemSplitAmount, paymentOutstanding).toFixed(2));
+    setIsPreviewingSplit(true);
     setPaymentError(null);
+
+    try {
+      const preview = await previewOrderSplit({
+        itemIds: paymentSplitItemIds,
+        mode: "items",
+      });
+      setPaymentAmount((preview.splits[0]?.amount ?? 0).toFixed(2));
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Could not preview split bill.");
+    } finally {
+      setIsPreviewingSplit(false);
+    }
   }
 
   function openManagerPanel(
@@ -1884,11 +1966,90 @@ export default function RestaurantsPage() {
     setVoidReason("");
     setTransferTableId("");
     setCancelReason("");
+    setManagerConfirmation("");
   }
 
   function closeManagerPanel() {
     setManagerPanelOrderId(null);
     setManagerActionError(null);
+    setManagerConfirmation("");
+  }
+
+  async function queueOfflineManagerAction(
+    actionType: "order.item.void" | "order.table.transfer",
+    payload: Record<string, unknown>,
+    message: string,
+  ) {
+    if (!data || !selectedRestaurant || !managerPanelOrder) {
+      setManagerActionError("Choose an order before queuing manager actions.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    await enqueueRestaurantAction({
+      actionType,
+      actorUserId: data.currentUser.clerkUserId,
+      createdAt: now,
+      deviceId: getRestaurantDeviceId(),
+      entityId: managerPanelOrder.id,
+      entityType: "order",
+      id: crypto.randomUUID(),
+      idempotencyKey: crypto.randomUUID(),
+      occurredAt: now,
+      payload,
+      propertyId: selectedRestaurant.property.id,
+      restaurantId: selectedRestaurant.id,
+      retryCount: 0,
+      status: "queued",
+      tenantId: data.tenant.id,
+    });
+
+    setQueuedActionCount(await countQueuedRestaurantActions());
+    closeManagerPanel();
+    setError(message);
+  }
+
+  async function queueOfflinePayment(
+    order: RestaurantResponse["restaurants"][number]["orders"][number],
+    payload: {
+      amount: number;
+      method: string;
+      orderId: string;
+      reference?: string;
+    },
+    message: string,
+  ) {
+    if (!data || !selectedRestaurant) {
+      setPaymentError("Choose an order before queuing payments.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    await enqueueRestaurantAction({
+      actionType: "order.payment.record",
+      actorUserId: data.currentUser.clerkUserId,
+      createdAt: now,
+      deviceId: getRestaurantDeviceId(),
+      entityId: order.id,
+      entityType: "payment",
+      id: crypto.randomUUID(),
+      idempotencyKey: crypto.randomUUID(),
+      occurredAt: now,
+      payload,
+      propertyId: selectedRestaurant.property.id,
+      restaurantId: selectedRestaurant.id,
+      retryCount: 0,
+      status: "queued",
+      tenantId: data.tenant.id,
+    });
+
+    setQueuedActionCount(await countQueuedRestaurantActions());
+    setPayingOrderId(null);
+    setPaymentDrawerOrderId(null);
+    setPaymentError(null);
+    setError(message);
   }
 
   async function searchActiveStays() {
@@ -1921,13 +2082,6 @@ export default function RestaurantsPage() {
       return;
     }
 
-    const token = await getOrganizationToken();
-
-    if (!token) {
-      setPaymentError("Select or create a workspace organization before taking payment.");
-      return;
-    }
-
     const amount = Number(paymentAmount) || paymentOutstanding;
 
     if (amount <= 0) {
@@ -1935,35 +2089,71 @@ export default function RestaurantsPage() {
       return;
     }
 
-    setPayingOrderId(paymentDrawerOrder.id);
-    setPaymentError(null);
+    const paymentPayload = {
+      amount,
+      method: paymentMethod,
+      orderId: paymentDrawerOrder.id,
+      reference: paymentReference || undefined,
+    };
 
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${paymentDrawerOrder.id}/pay`,
-      {
-        body: JSON.stringify({
-          amount,
-          method: paymentMethod,
-          reference: paymentReference || undefined,
-        }),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-        },
-        method: "POST",
-      },
-    );
-
-    setPayingOrderId(null);
-
-    if (!response.ok) {
-      setPaymentError(await readApiMessage(response, "Could not record payment."));
+    if (!isOnline) {
+      await queueOfflinePayment(
+        paymentDrawerOrder,
+        paymentPayload,
+        "Offline payment queued. It will sync when the connection is restored.",
+      );
       return;
     }
 
-    const updatedOrder =
-      (await response.json()) as RestaurantResponse["restaurants"][number]["orders"][number];
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setPaymentError("Select or create a workspace organization before taking payment.");
+      return;
+    }
+
+    setPayingOrderId(paymentDrawerOrder.id);
+    setPaymentError(null);
+
+    let updatedOrder: RestaurantResponse["restaurants"][number]["orders"][number];
+
+    try {
+      const paymentRequestBody = {
+        amount: paymentPayload.amount,
+        method: paymentPayload.method,
+        reference: paymentPayload.reference,
+      };
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${paymentDrawerOrder.id}/pay`,
+        {
+          body: JSON.stringify(paymentRequestBody),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          method: "POST",
+        },
+      );
+
+      setPayingOrderId(null);
+
+      if (!response.ok) {
+        setPaymentError(await readApiMessage(response, "Could not record payment."));
+        return;
+      }
+
+      updatedOrder =
+        (await response.json()) as RestaurantResponse["restaurants"][number]["orders"][number];
+    } catch {
+      await queueOfflinePayment(
+        paymentDrawerOrder,
+        paymentPayload,
+        "Network dropped. Payment queued locally for sync.",
+      );
+      return;
+    }
 
     if (isCompletedOrder(updatedOrder.status)) {
       printReceipt(updatedOrder);
@@ -2105,15 +2295,20 @@ export default function RestaurantsPage() {
       return;
     }
 
-    const token = await getOrganizationToken();
-
-    if (!token) {
-      setManagerActionError("Select or create a workspace organization before manager actions.");
+    if (managerConfirmation.trim().toUpperCase() !== "APPROVE") {
+      setManagerActionError("Type APPROVE to confirm this manager action.");
       return;
     }
 
     let endpoint = "";
     let body: Record<string, unknown> = {};
+    let offlineAction:
+      | {
+          actionType: "order.item.void" | "order.table.transfer";
+          message: string;
+          payload: Record<string, unknown>;
+        }
+      | null = null;
 
     if (managerAction === "discount") {
       const amount = Number(discountAmount);
@@ -2140,6 +2335,15 @@ export default function RestaurantsPage() {
 
       endpoint = `items/${voidItemId}/void`;
       body = { voidReason };
+      offlineAction = {
+        actionType: "order.item.void",
+        message: "Offline item void queued. It will sync when the connection is restored.",
+        payload: {
+          itemId: voidItemId,
+          orderId: managerPanelOrder.id,
+          voidReason,
+        },
+      };
     }
 
     if (managerAction === "transfer") {
@@ -2150,6 +2354,14 @@ export default function RestaurantsPage() {
 
       endpoint = "transfer-table";
       body = { tableId: transferTableId };
+      offlineAction = {
+        actionType: "order.table.transfer",
+        message: "Offline table transfer queued. It will sync when the connection is restored.",
+        payload: {
+          orderId: managerPanelOrder.id,
+          tableId: transferTableId,
+        },
+      };
     }
 
     if (managerAction === "cancel") {
@@ -2157,28 +2369,60 @@ export default function RestaurantsPage() {
       body = { reason: cancelReason || undefined };
     }
 
+    if (offlineAction && !isOnline) {
+      await queueOfflineManagerAction(
+        offlineAction.actionType,
+        offlineAction.payload,
+        offlineAction.message,
+      );
+      return;
+    }
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setManagerActionError("Select or create a workspace organization before manager actions.");
+      return;
+    }
+
     setIsSubmitting(true);
     setManagerActionError(null);
 
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${managerPanelOrder.id}/${endpoint}`,
-      {
-        body: JSON.stringify(body),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${selectedRestaurant.id}/orders/${managerPanelOrder.id}/${endpoint}`,
+        {
+          body: JSON.stringify(body),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          method: "POST",
         },
-        method: "POST",
-      },
-    );
-
-    setIsSubmitting(false);
-
-    if (!response.ok) {
-      setManagerActionError(
-        await readApiMessage(response, "Could not complete manager action."),
       );
+
+      setIsSubmitting(false);
+
+      if (!response.ok) {
+        setManagerActionError(
+          await readApiMessage(response, "Could not complete manager action."),
+        );
+        return;
+      }
+    } catch {
+      setIsSubmitting(false);
+
+      if (offlineAction) {
+        await queueOfflineManagerAction(
+          offlineAction.actionType,
+          offlineAction.payload,
+          "Network dropped. Manager action queued locally for sync.",
+        );
+        return;
+      }
+
+      setManagerActionError("Network dropped before this manager action could complete.");
       return;
     }
 
@@ -3579,7 +3823,7 @@ export default function RestaurantsPage() {
                             <label>
                               Guests
                               <input
-                                min="1"
+                                min="2"
                                 onChange={(event) =>
                                   setPaymentSplitCount(event.target.value)
                                 }
@@ -3587,8 +3831,12 @@ export default function RestaurantsPage() {
                                 value={paymentSplitCount}
                               />
                             </label>
-                            <button onClick={applyEqualSplit} type="button">
-                              Use split
+                            <button
+                              disabled={isPreviewingSplit}
+                              onClick={applyEqualSplit}
+                              type="button"
+                            >
+                              {isPreviewingSplit ? "Checking..." : "Use split"}
                             </button>
                           </div>
                         ) : (
@@ -3618,8 +3866,12 @@ export default function RestaurantsPage() {
                                 </label>
                               ))}
                             </div>
-                            <button onClick={applyItemSplit} type="button">
-                              Use items
+                            <button
+                              disabled={isPreviewingSplit}
+                              onClick={applyItemSplit}
+                              type="button"
+                            >
+                              {isPreviewingSplit ? "Checking..." : "Use items"}
                             </button>
                           </div>
                         )}
@@ -3847,6 +4099,7 @@ export default function RestaurantsPage() {
                                 onClick={() => {
                                   setManagerAction(action.id);
                                   setManagerActionError(null);
+                                  setManagerConfirmation("");
                                 }}
                                 type="button"
                               >
@@ -3981,6 +4234,22 @@ export default function RestaurantsPage() {
                         {managerAction === "reprint" ? (
                           <div className="manager-action-note">
                             Reprint the current receipt in the browser print dialog.
+                          </div>
+                        ) : null}
+
+                        {managerAction !== "reprint" ? (
+                          <div className="manager-action-grid">
+                            <label className="manager-action-wide">
+                              Manager confirmation
+                              <input
+                                autoComplete="off"
+                                onChange={(event) =>
+                                  setManagerConfirmation(event.target.value)
+                                }
+                                placeholder="Type APPROVE"
+                                value={managerConfirmation}
+                              />
+                            </label>
                           </div>
                         ) : null}
 
