@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "format": "prettier --write .",
     "db:generate": "pnpm --filter @rayaan/database db:generate",
-    "db:migrate": "pnpm --filter @rayaan/database db:migrate"
+    "db:migrate": "pnpm --filter @rayaan/database db:migrate",
+    "db:migrate:deploy": "pnpm --filter @rayaan/database db:migrate:deploy"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

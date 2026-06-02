@@ -22,9 +22,12 @@
   --shadow-sm: 0 1px 2px rgba(7, 17, 31, 0.05), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
   --shadow-md: 0 18px 45px rgba(7, 17, 31, 0.08);
   --shadow-lg: 0 32px 90px rgba(7, 17, 31, 0.14);
+  --button-shadow: 0 10px 18px rgba(8, 127, 140, 0.18), 0 1px 0 rgba(255, 255, 255, 0.34) inset;
+  --button-shadow-hover: 0 16px 30px rgba(8, 127, 140, 0.24), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  --control-shadow: 0 1px 2px rgba(7, 17, 31, 0.06), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
   --radius: 8px;
   --radius-lg: 12px;
-  --sidebar-width: 268px;
+  --sidebar-width: 232px;
   --room-available: #0f766e;
   --room-occupied: #2563eb;
   --room-cleaning: #b7791f;
@@ -143,7 +146,7 @@ nav a[data-active="true"] {
 .workspace {
   min-width: 0;
   overflow-x: clip;
-  padding: 26px clamp(20px, 3vw, 42px) 42px;
+  padding: 26px clamp(20px, 3.5vw, 64px) 42px;
 }
 
 .topbar {
@@ -187,19 +190,24 @@ h1 {
 
 button {
   align-items: center;
-  background: var(--accent);
-  border: 0;
+  background: linear-gradient(180deg, #0a96a3 0%, var(--accent) 100%);
+  border: 1px solid rgba(8, 127, 140, 0.72);
   border-radius: var(--radius);
   color: white;
   cursor: pointer;
   display: inline-flex;
   gap: 8px;
   justify-content: center;
-  font-weight: 700;
+  font-weight: 850;
+  letter-spacing: 0;
   min-height: 44px;
+  min-width: 44px;
   padding: 0 18px;
+  position: relative;
   touch-action: manipulation;
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+  user-select: none;
+  white-space: nowrap;
 }
 
 button svg {
@@ -210,7 +218,8 @@ button svg {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.65;
+  opacity: 0.52;
+  transform: none;
 }
 
 input {
@@ -242,9 +251,19 @@ select {
 }
 
 button:hover:not(:disabled) {
-  background: var(--accent-dark);
-  box-shadow: 0 12px 22px rgba(8, 127, 140, 0.18);
+  background: linear-gradient(180deg, #0a8996 0%, var(--accent-dark) 100%);
+  box-shadow: var(--button-shadow-hover);
+  color: #ffffff;
   transform: translateY(-1px);
+}
+
+button:hover:not(:disabled) svg {
+  color: currentColor;
+}
+
+button:active:not(:disabled) {
+  box-shadow: 0 6px 14px rgba(8, 127, 140, 0.16);
+  transform: translateY(0);
 }
 
 button:focus-visible,
@@ -264,14 +283,16 @@ select:focus {
 
 .button-link {
   align-items: center;
-  background: var(--accent);
+  background: linear-gradient(180deg, #0a96a3 0%, var(--accent) 100%);
+  border: 1px solid rgba(8, 127, 140, 0.72);
   border-radius: var(--radius);
+  box-shadow: var(--button-shadow);
   color: white;
   display: inline-flex;
-  font-weight: 700;
+  font-weight: 850;
   min-height: 44px;
   padding: 0 18px;
-  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
 .topbar > .button-link {
@@ -279,26 +300,29 @@ select:focus {
 }
 
 .button-link:hover {
-  background: var(--accent-dark);
-  box-shadow: var(--shadow-sm);
+  background: linear-gradient(180deg, #0a8996 0%, var(--accent-dark) 100%);
+  box-shadow: var(--button-shadow-hover);
   transform: translateY(-1px);
 }
 
 .secondary-link {
   align-items: center;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  box-shadow: var(--control-shadow);
   color: var(--ink);
   display: inline-flex;
-  font-weight: 700;
+  font-weight: 850;
   min-height: 44px;
   padding: 0 18px;
-  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
 .secondary-link:hover {
   background: #ffffff;
   border-color: var(--line-strong);
+  box-shadow: 0 10px 20px rgba(7, 17, 31, 0.08);
   transform: translateY(-1px);
 }
 
@@ -310,28 +334,121 @@ select:focus {
 .account-controls {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: 10px;
+  justify-content: flex-end;
   min-width: 0;
+}
+
+.account-control-trigger {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 999px !important;
+  box-shadow: var(--control-shadow) !important;
+  color: var(--ink-strong) !important;
+  min-height: 42px !important;
+  padding: 4px 12px 4px 6px !important;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease !important;
+}
+
+.account-control-trigger:hover,
+.account-control-trigger:focus-visible {
+  background: #ffffff !important;
+  border-color: rgba(8, 127, 140, 0.48) !important;
+  box-shadow: 0 12px 24px rgba(7, 17, 31, 0.1) !important;
+  transform: translateY(-1px);
+}
+
+.account-control-preview {
+  gap: 8px !important;
+}
+
+.account-control-avatar,
+.account-user-avatar {
+  border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 8px 18px rgba(7, 17, 31, 0.12) !important;
+}
+
+.account-control-label {
+  color: var(--ink-strong) !important;
+  font-size: 14px !important;
+  font-weight: 850 !important;
+  letter-spacing: 0 !important;
+  max-width: 150px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.account-control-trigger-icon {
+  color: var(--muted) !important;
+  height: 16px !important;
+  width: 16px !important;
+}
+
+.account-user-avatar {
+  height: 42px !important;
+  width: 42px !important;
+}
+
+.account-popover-card {
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  overflow: hidden !important;
+}
+
+.account-popover-actions,
+.account-popover-footer {
+  background: #ffffff !important;
+}
+
+.account-popover-action {
+  background: #ffffff !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: var(--ink-strong) !important;
+  min-height: 48px !important;
+  transform: none !important;
+}
+
+.account-popover-action:hover,
+.account-popover-action:focus-visible {
+  background: #eef8f5 !important;
+  color: var(--ink-strong) !important;
+  box-shadow: inset 3px 0 0 var(--accent) !important;
+}
+
+.account-popover-action-text {
+  color: var(--ink-strong) !important;
+  font-weight: 800 !important;
+}
+
+.account-popover-action-icon {
+  color: var(--accent-strong) !important;
 }
 
 .safe-sign-out-button {
   align-items: center;
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--ink);
+  box-shadow: var(--control-shadow);
+  color: var(--ink-strong);
   cursor: pointer;
   display: inline-flex;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 850;
   gap: 8px;
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 42px;
+  padding: 0 16px;
 }
 
 .safe-sign-out-button:hover {
-  background: #f8fafc;
-  border-color: var(--line-strong);
+  background: #ffffff;
+  border-color: rgba(8, 127, 140, 0.48);
+  box-shadow: 0 12px 24px rgba(7, 17, 31, 0.1);
+  color: var(--ink-strong);
 }
 
 .safe-sign-out-button:disabled {
@@ -340,8 +457,9 @@ select:focus {
 }
 
 .safe-sign-out-button svg {
-  height: 16px;
-  width: 16px;
+  color: var(--ink-strong);
+  height: 17px;
+  width: 17px;
 }
 
 .sign-out-status {
@@ -480,7 +598,7 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  max-width: 720px;
+  max-width: none;
   min-width: 0;
   padding: 24px;
   width: 100%;
@@ -813,21 +931,25 @@ select:focus {
 }
 
 .secondary-button {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
+  box-shadow: var(--control-shadow);
   color: var(--ink);
   min-height: 36px;
   padding: 0 12px;
 }
 
 .secondary-button:hover {
-  background: #f8fafc;
+  background: #ffffff;
   border-color: var(--line-strong);
+  box-shadow: 0 10px 18px rgba(7, 17, 31, 0.08);
+  color: var(--ink-strong);
 }
 
 .danger-button {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #fff7f7 100%);
   border: 1px solid #fecdca;
+  box-shadow: 0 1px 2px rgba(180, 35, 24, 0.06), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
   color: #b42318;
   min-height: 36px;
   padding: 0 12px;
@@ -835,12 +957,16 @@ select:focus {
 
 .danger-button:hover {
   background: #fef3f2;
+  border-color: #fda29b;
+  box-shadow: 0 10px 18px rgba(180, 35, 24, 0.1);
+  color: #b42318;
 }
 
 .icon-button {
   align-items: center;
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
+  box-shadow: var(--control-shadow);
   color: var(--ink);
   display: inline-flex;
   justify-content: center;
@@ -850,8 +976,10 @@ select:focus {
 }
 
 .icon-button:hover {
-  background: #f8fafc;
+  background: #ffffff;
   border-color: var(--line-strong);
+  box-shadow: 0 10px 18px rgba(7, 17, 31, 0.08);
+  color: var(--ink-strong);
 }
 
 .team-row-actions {
@@ -871,7 +999,7 @@ select:focus {
 .operations-grid {
   display: grid;
   gap: 18px;
-  max-width: 1560px;
+  max-width: none;
   min-width: 0;
   width: 100%;
 }
@@ -908,35 +1036,70 @@ select:focus {
   border: 1px solid rgba(219, 228, 239, 0.82);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  display: flex;
-  gap: 6px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   margin-top: -4px;
   min-width: 0;
-  overflow-x: auto;
+  overflow: visible;
   padding: 6px;
   position: sticky;
   top: 92px;
   z-index: 24;
 }
 
-.workbench-jump-nav a {
+.workbench-jump-nav button {
   align-items: center;
+  background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--muted);
-  display: inline-flex;
-  flex: 0 0 auto;
+  cursor: pointer;
+  display: grid;
   font-size: 14px;
   font-weight: 850;
+  gap: 2px;
+  justify-items: start;
   min-height: 40px;
-  padding: 0 13px;
+  min-width: 0;
+  padding: 10px 13px;
+  text-align: left;
+  width: 100%;
 }
 
-.workbench-jump-nav a:hover,
-.workbench-jump-nav a:focus-visible {
-  background: var(--panel);
-  border-color: var(--line);
+.workbench-jump-nav button strong {
+  color: inherit;
+  font-size: 14px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.workbench-jump-nav button span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  max-width: none;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.workbench-jump-nav button:hover,
+.workbench-jump-nav button:focus-visible,
+.workbench-jump-nav button[data-active="true"] {
+  background: linear-gradient(180deg, #ffffff 0%, #eef8f5 100%);
+  border-color: rgba(8, 127, 140, 0.34);
   color: var(--ink-strong);
+}
+
+.workbench-jump-nav button[data-active="true"] {
+  border-color: rgba(8, 127, 140, 0.62);
+  box-shadow: 0 12px 26px rgba(8, 127, 140, 0.14), inset 0 -3px 0 var(--accent);
+}
+
+.workbench-jump-nav button:not([data-active="true"]):hover {
+  box-shadow: 0 10px 22px rgba(7, 17, 31, 0.08);
+  transform: translateY(-1px);
 }
 
 .operations-grid [id] {
@@ -1199,9 +1362,10 @@ select:focus {
 
 .restaurant-report-panel button {
   align-items: center;
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
   border-radius: 8px;
+  box-shadow: var(--control-shadow);
   color: var(--ink-strong);
   display: inline-flex;
   font-weight: 800;
@@ -1212,9 +1376,10 @@ select:focus {
 }
 
 .report-kind-toggle {
-  background: #ffffff;
+  background: rgba(241, 245, 249, 0.86);
   border: 1px solid var(--line);
   border-radius: 8px;
+  box-shadow: var(--control-shadow);
   display: grid;
   gap: 4px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1222,13 +1387,16 @@ select:focus {
 }
 
 .report-kind-toggle button {
+  background: transparent;
   border: 0;
+  box-shadow: none;
   min-height: 32px;
   padding: 0 10px;
 }
 
 .report-kind-toggle button[data-selected="true"] {
-  background: #eef8f5;
+  background: #ffffff;
+  box-shadow: 0 8px 16px rgba(7, 17, 31, 0.08);
   color: var(--accent-strong);
 }
 
@@ -1305,7 +1473,7 @@ select:focus {
   align-items: flex-start;
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
   min-width: 0;
 }
 
@@ -1342,6 +1510,12 @@ select:focus {
   border-color: rgba(8, 127, 140, 0.5);
   color: var(--ink);
   box-shadow: 0 18px 34px rgba(8, 127, 140, 0.11);
+  transform: translateY(-1px);
+}
+
+.property-card[data-selected="true"] {
+  border-color: rgba(8, 127, 140, 0.72);
+  box-shadow: 0 20px 38px rgba(8, 127, 140, 0.16), inset 0 0 0 1px rgba(8, 127, 140, 0.08);
 }
 
 .property-card svg {
@@ -1360,6 +1534,28 @@ select:focus {
   gap: 18px;
   min-width: 0;
   width: 100%;
+}
+
+.restaurant-workspace-layout {
+  grid-template-columns: 1fr;
+}
+
+.restaurant-selector-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  max-height: none;
+  overflow: visible;
+  position: static;
+  top: auto;
+}
+
+.restaurant-selector-list .property-card {
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 92px;
+}
+
+.restaurant-selector-list .property-card svg {
+  grid-row: span 3;
 }
 
 .property-detail-card,
@@ -1435,6 +1631,7 @@ select:focus {
   border-color: var(--accent);
   color: var(--ink);
   box-shadow: 0 14px 24px rgba(15, 118, 110, 0.08);
+  transform: translateY(-1px);
 }
 
 .status-filter-button span {
@@ -1619,7 +1816,7 @@ select:focus {
 .restaurant-table-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   margin-top: 18px;
   min-width: 0;
 }
@@ -1714,8 +1911,27 @@ select:focus {
 
 .restaurant-table-card:hover,
 .restaurant-table-card[data-selected="true"] {
-  border-color: var(--accent);
-  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, #ffffff 0%, #eef8f5 100%);
+  border-color: rgba(8, 127, 140, 0.7);
+  box-shadow: 0 18px 34px rgba(8, 127, 140, 0.16);
+  transform: translateY(-1px);
+}
+
+.restaurant-table-card[data-selected="true"] {
+  background: linear-gradient(180deg, #0b98a3 0%, #087f8c 100%);
+  border-color: var(--accent-dark);
+  box-shadow: 0 22px 42px rgba(8, 127, 140, 0.24);
+  color: #ffffff;
+}
+
+.restaurant-table-card[data-selected="true"] span,
+.restaurant-table-card[data-selected="true"] small,
+.restaurant-table-card[data-selected="true"] svg {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.restaurant-table-card[data-selected="true"] strong {
+  color: #ffffff;
 }
 
 .restaurant-table-card[data-status="free"] {
@@ -1796,6 +2012,35 @@ select:focus {
 
 .table-order-chip strong {
   font-size: 12px;
+}
+
+.restaurant-table-card[data-selected="true"] strong {
+  color: #ffffff;
+}
+
+.restaurant-table-card[data-selected="true"] span,
+.restaurant-table-card[data-selected="true"] small,
+.restaurant-table-card[data-selected="true"] svg,
+.restaurant-table-card[data-selected="true"] .table-card-meta,
+.restaurant-table-card[data-selected="true"] .table-card-meta svg {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.restaurant-table-card[data-selected="true"] .table-status-label {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(255, 255, 255, 0.88);
+  color: var(--ink-strong);
+}
+
+.restaurant-table-card[data-selected="true"] .table-order-chip {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(255, 255, 255, 0.88);
+  color: var(--ink-strong) !important;
+}
+
+.restaurant-table-card[data-selected="true"] .table-order-chip svg,
+.restaurant-table-card[data-selected="true"] .table-order-chip strong {
+  color: var(--ink-strong);
 }
 
 .table-service-panel {
@@ -2191,7 +2436,7 @@ select:focus {
 
 .pos-order-builder {
   align-items: stretch;
-  grid-template-columns: minmax(0, 1.35fr) minmax(330px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
 }
 
 .pos-menu-panel,
@@ -2211,8 +2456,8 @@ select:focus {
 .pos-ticket-panel {
   align-content: flex-start;
   background: #f8fafc;
-  position: sticky;
-  top: 154px;
+  position: relative;
+  z-index: 1;
 }
 
 .pos-builder-toolbar {
@@ -2260,23 +2505,25 @@ select:focus {
 }
 
 .pos-category-tabs button {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
+  box-shadow: var(--control-shadow);
   color: var(--muted);
   min-height: 36px;
   padding: 0 12px;
 }
 
 .pos-category-tabs button[data-selected="true"] {
-  background: #eef8f5;
+  background: linear-gradient(180deg, #f2fffb 0%, #e7f7f8 100%);
   border-color: #99d6ca;
+  box-shadow: inset 0 0 0 1px rgba(8, 127, 140, 0.08), var(--control-shadow);
   color: var(--accent-strong);
 }
 
 .pos-menu-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
 }
 
 .pos-menu-tile {
@@ -2294,8 +2541,9 @@ select:focus {
 }
 
 .pos-menu-tile:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-md);
+  background: linear-gradient(180deg, #ffffff 0%, #eef8f5 100%);
+  border-color: rgba(8, 127, 140, 0.7);
+  box-shadow: 0 18px 34px rgba(8, 127, 140, 0.14);
   transform: translateY(-1px);
 }
 
@@ -2444,6 +2692,7 @@ select:focus {
 .quantity-stepper button {
   min-height: 34px;
   padding: 0;
+  width: 34px;
 }
 
 .quantity-stepper input {
@@ -2464,6 +2713,7 @@ select:focus {
 .pos-manual-add button {
   min-height: 44px;
   padding: 0;
+  width: 44px;
 }
 
 .pos-ticket-total {
@@ -2555,16 +2805,18 @@ select:focus {
 }
 
 .payment-split-tabs button {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
+  box-shadow: var(--control-shadow);
   color: var(--muted);
   min-height: 36px;
   padding: 0 12px;
 }
 
 .payment-split-tabs button[data-selected="true"] {
-  background: #eef8f5;
+  background: linear-gradient(180deg, #f2fffb 0%, #e7f7f8 100%);
   border-color: #99d6ca;
+  box-shadow: inset 0 0 0 1px rgba(8, 127, 140, 0.08), var(--control-shadow);
   color: var(--accent-strong);
 }
 
@@ -2653,16 +2905,18 @@ select:focus {
 }
 
 .payment-method-grid button {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
+  box-shadow: var(--control-shadow);
   color: var(--muted);
   min-height: 40px;
   padding: 0 10px;
 }
 
 .payment-method-grid button[data-selected="true"] {
-  background: #eef8f5;
+  background: linear-gradient(180deg, #f2fffb 0%, #e7f7f8 100%);
   border-color: #99d6ca;
+  box-shadow: inset 0 0 0 1px rgba(8, 127, 140, 0.08), var(--control-shadow);
   color: var(--accent-strong);
 }
 
@@ -2728,6 +2982,7 @@ select:focus {
 .stay-option-card[data-selected="true"] {
   background: #eef8f5;
   border-color: var(--accent);
+  box-shadow: 0 14px 26px rgba(8, 127, 140, 0.12);
 }
 
 .manager-action-panel {
@@ -2765,16 +3020,18 @@ select:focus {
 }
 
 .manager-action-tabs button {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--line);
+  box-shadow: var(--control-shadow);
   color: var(--muted);
   min-height: 40px;
   padding: 0 10px;
 }
 
 .manager-action-tabs button[data-selected="true"] {
-  background: #f2f4f7;
+  background: linear-gradient(180deg, #ffffff 0%, #f2f4f7 100%);
   border-color: #98a2b3;
+  box-shadow: inset 0 0 0 1px rgba(52, 64, 84, 0.06), var(--control-shadow);
   color: var(--ink-strong);
 }
 
@@ -2810,7 +3067,7 @@ select:focus {
 .menu-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   margin-top: 16px;
   min-width: 0;
 }
@@ -2876,6 +3133,24 @@ select:focus {
 .kitchen-order .allergen-flag,
 .kitchen-order .dietary-flag {
   color: inherit;
+}
+
+@media (min-width: 1500px) {
+  .pos-order-builder {
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+  }
+
+  .pos-menu-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .restaurant-table-grid {
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  }
+
+  .menu-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
 }
 
 .order-draft-list {
@@ -2961,9 +3236,10 @@ select:focus {
 }
 
 .segmented-control {
-  background: #f1f5f9;
+  background: rgba(241, 245, 249, 0.86);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  box-shadow: var(--control-shadow);
   display: inline-grid;
   gap: 4px;
   grid-template-columns: repeat(2, minmax(110px, 1fr));
@@ -2973,6 +3249,7 @@ select:focus {
 .segmented-control button {
   background: transparent;
   border: 1px solid transparent;
+  box-shadow: none;
   color: var(--muted);
   gap: 8px;
   min-height: 38px;
@@ -2983,7 +3260,7 @@ select:focus {
 .segmented-control button[data-selected="true"] {
   background: #ffffff;
   border-color: var(--line);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 16px rgba(7, 17, 31, 0.08);
   color: var(--ink-strong);
   transform: none;
 }
@@ -3569,7 +3846,16 @@ select:focus {
 .order-history-row:hover,
 .menu-item-card:hover,
 .reservation-row:hover {
-  box-shadow: var(--shadow-md);
+  border-color: rgba(8, 127, 140, 0.42);
+  box-shadow: 0 18px 36px rgba(7, 17, 31, 0.11);
+  transform: translateY(-1px);
+}
+
+.menu-item-card:hover,
+.reservation-row:hover,
+.order-compact-row:hover,
+.order-history-row:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfb 100%);
 }
 
 @media (min-width: 1320px) {
@@ -3733,6 +4019,15 @@ select:focus {
 
   nav a {
     min-height: 42px;
+  }
+
+  .workbench-jump-nav button {
+    min-height: 42px;
+    padding: 9px 11px;
+  }
+
+  .workbench-jump-nav button span {
+    display: none;
   }
 
   .account-controls,

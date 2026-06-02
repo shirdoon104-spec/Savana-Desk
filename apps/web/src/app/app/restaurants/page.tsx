@@ -34,6 +34,13 @@ import {
 } from "./offline-actions";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type RestaurantWorkspaceView =
+  | "overview"
+  | "floor"
+  | "bookings"
+  | "menu"
+  | "pos"
+  | "orders";
 
 interface RestaurantResponse {
   allowedOrderStatuses: string[];
@@ -476,6 +483,45 @@ export default function RestaurantsPage() {
   const [orderListMode, setOrderListMode] = useState<"active" | "history">(
     "active",
   );
+  const [workspaceView, setWorkspaceView] =
+    useState<RestaurantWorkspaceView>("overview");
+
+  const workspaceTabs: Array<{
+    description: string;
+    id: RestaurantWorkspaceView;
+    label: string;
+  }> = [
+    {
+      description: "Live totals, reports, alerts, and sync review.",
+      id: "overview",
+      label: "Overview",
+    },
+    {
+      description: "Tables, waiter assignment, QR links, and covers.",
+      id: "floor",
+      label: "Floor",
+    },
+    {
+      description: "Reservations, waitlist, guest requests, and booking actions.",
+      id: "bookings",
+      label: "Bookings",
+    },
+    {
+      description: "Menu categories, item availability, images, and stock.",
+      id: "menu",
+      label: "Menu",
+    },
+    {
+      description: "Create orders from menu items and send them to service.",
+      id: "pos",
+      label: "POS",
+    },
+    {
+      description: "Active orders, payment drawer, history, and manager actions.",
+      id: "orders",
+      label: "Orders",
+    },
+  ];
 
   const selectedRestaurant = useMemo(
     () =>
@@ -550,6 +596,7 @@ export default function RestaurantsPage() {
   }
 
   function openNewReservationModal() {
+    setWorkspaceView("bookings");
     resetReservationForm();
     setIsReservationModalOpen(true);
   }
@@ -1693,6 +1740,7 @@ export default function RestaurantsPage() {
     setOrderMenuSearch("");
     setSelectedMenuCategoryId("all");
     setReservationOrderSource(reservation.guestName);
+    setWorkspaceView("pos");
     setError(
       requestedItems.length
         ? "Reservation items loaded into the current order."
@@ -2676,12 +2724,18 @@ export default function RestaurantsPage() {
       {error ? <div className="form-error">{error}</div> : null}
 
       <nav aria-label="Restaurant workspace" className="workbench-jump-nav">
-        <a href="#restaurant-insights">Insights</a>
-        <a href="#restaurant-floor">Floor</a>
-        <a href="#restaurant-reservations">Bookings</a>
-        <a href="#restaurant-menu">Menu</a>
-        <a href="#restaurant-pos">POS</a>
-        <a href="#restaurant-orders">Orders</a>
+        {workspaceTabs.map((tab) => (
+          <button
+            aria-current={workspaceView === tab.id ? "page" : undefined}
+            data-active={workspaceView === tab.id}
+            key={tab.id}
+            onClick={() => setWorkspaceView(tab.id)}
+            type="button"
+          >
+            <strong>{tab.label}</strong>
+            <span>{tab.description}</span>
+          </button>
+        ))}
       </nav>
 
       {frontOfHouseNotifications.length ? (
@@ -2726,7 +2780,9 @@ export default function RestaurantsPage() {
         </section>
       ) : null}
 
-      {data?.canManageRestaurant && offlineConflicts.length ? (
+      {workspaceView === "overview" &&
+      data?.canManageRestaurant &&
+      offlineConflicts.length ? (
         <section className="offline-review-panel">
           <div className="offline-review-header">
             <AlertTriangle aria-hidden="true" />
@@ -2766,7 +2822,9 @@ export default function RestaurantsPage() {
         </section>
       ) : null}
 
-      {data?.canManageRestaurant && selectedRestaurant ? (
+      {workspaceView === "overview" &&
+      data?.canManageRestaurant &&
+      selectedRestaurant ? (
         <section className="restaurant-report-panel" id="restaurant-insights">
           <div>
             <BarChart3 aria-hidden="true" />
@@ -2817,7 +2875,7 @@ export default function RestaurantsPage() {
         </section>
       ) : null}
 
-      {data?.canManageRestaurant && liveDashboard ? (
+      {workspaceView === "overview" && data?.canManageRestaurant && liveDashboard ? (
         <section className="live-dashboard-panel" id="restaurant-live">
           <div className="live-dashboard-header">
             <BarChart3 aria-hidden="true" />
@@ -2875,27 +2933,30 @@ export default function RestaurantsPage() {
         </section>
       ) : null}
 
-      <section className="status-grid property-stats">
-        <div>
-          <span>Restaurants</span>
-          <strong>{data?.restaurants.length ?? 0}</strong>
-        </div>
-        <div>
-          <span>Active tables</span>
-          <strong>{seatedTablesCount}</strong>
-        </div>
-        <div>
-          <span>Covers seated</span>
-          <strong>{coverCount}</strong>
-        </div>
-        <div>
-          <span>Current role</span>
-          <strong>{data?.currentUser.role.replaceAll("_", " ") ?? "Loading"}</strong>
-        </div>
-      </section>
+      {workspaceView === "overview" ? (
+        <section className="status-grid property-stats">
+          <div>
+            <span>Restaurants</span>
+            <strong>{data?.restaurants.length ?? 0}</strong>
+          </div>
+          <div>
+            <span>Active tables</span>
+            <strong>{seatedTablesCount}</strong>
+          </div>
+          <div>
+            <span>Covers seated</span>
+            <strong>{coverCount}</strong>
+          </div>
+          <div>
+            <span>Current role</span>
+            <strong>{data?.currentUser.role.replaceAll("_", " ") ?? "Loading"}</strong>
+          </div>
+        </section>
+      ) : null}
 
-      <section className="property-layout">
-        <div className="property-list">
+      {workspaceView !== "overview" || !selectedRestaurant ? (
+      <section className="property-layout restaurant-workspace-layout">
+        <div className="property-list restaurant-selector-list">
           {(data?.restaurants ?? []).map((restaurant) => (
             <button
               className="property-card"
@@ -2986,28 +3047,39 @@ export default function RestaurantsPage() {
 
           {selectedRestaurant ? (
             <>
+              {workspaceView === "floor" || workspaceView === "bookings" ? (
               <section className="notice-panel property-detail-card pos-floor-section" id="restaurant-floor">
                 <div className="pos-floor-header">
                   <div>
-                    <p className="eyebrow">Floor map</p>
-                    <h2>{selectedRestaurant.name}</h2>
+                    <p className="eyebrow">
+                      {workspaceView === "bookings" ? "Bookings" : "Floor map"}
+                    </p>
+                    <h2>
+                      {workspaceView === "bookings"
+                        ? "Reservations and waitlist"
+                        : selectedRestaurant.name}
+                    </h2>
                     <p>
                       {selectedRestaurant.property.name} -{" "}
                       {selectedRestaurant.serviceStyle ?? "restaurant service"}
                     </p>
                   </div>
-                  <div className="floor-status-legend" aria-label="Table status legend">
-                    {["free", "reserved", "seated", "ordering", "served", "cleaning"].map(
-                      (status) => (
-                        <span key={status}>
-                          <i data-status={status} />
-                          {formatLabel(status)}
-                        </span>
-                      ),
-                    )}
-                  </div>
+                  {workspaceView === "floor" ? (
+                    <div className="floor-status-legend" aria-label="Table status legend">
+                      {["free", "reserved", "seated", "ordering", "served", "cleaning"].map(
+                        (status) => (
+                          <span key={status}>
+                            <i data-status={status} />
+                            {formatLabel(status)}
+                          </span>
+                        ),
+                      )}
+                    </div>
+                  ) : null}
                 </div>
 
+                {workspaceView === "floor" ? (
+                  <>
                 <div className="restaurant-table-grid">
                   {selectedRestaurant.tables.map((table) => {
                     const tableOrders = ordersByTable.get(table.id) ?? [];
@@ -3178,8 +3250,10 @@ export default function RestaurantsPage() {
                     </form>
                   </div>
                 ) : null}
+                  </>
+                ) : null}
 
-                {data?.canManageRestaurant ? (
+                {workspaceView === "bookings" && data?.canManageRestaurant ? (
                   <div className="reservation-panel" id="restaurant-reservations">
                     <div className="reservation-header">
                       <div>
@@ -3391,6 +3465,7 @@ export default function RestaurantsPage() {
                   </div>
                 ) : null}
               </section>
+              ) : null}
 
               {isReservationModalOpen ? (
                 <div className="modal-backdrop" role="presentation">
@@ -3583,7 +3658,7 @@ export default function RestaurantsPage() {
                 </div>
               ) : null}
 
-              {data?.canManageRestaurant ? (
+              {workspaceView === "menu" && data?.canManageRestaurant ? (
                 <section className="notice-panel compact-panel" id="restaurant-menu">
                   <p className="eyebrow">Menu</p>
                   <h2>Menu setup</h2>
@@ -3829,9 +3904,12 @@ export default function RestaurantsPage() {
                 </section>
               ) : null}
 
+              {workspaceView === "pos" || workspaceView === "orders" ? (
               <section className="notice-panel compact-panel" id="restaurant-pos">
-                <p className="eyebrow">Orders</p>
-                {data?.canCreateOrder ? (
+                <p className="eyebrow">
+                  {workspaceView === "pos" ? "Point of sale" : "Orders"}
+                </p>
+                {workspaceView === "pos" && data?.canCreateOrder ? (
                   <form
                     className="restaurant-order-builder pos-order-builder"
                     onSubmit={createOrder}
@@ -4084,6 +4162,7 @@ export default function RestaurantsPage() {
                   </form>
                 ) : null}
 
+                {workspaceView === "orders" ? (
                 <div className="restaurant-order-list" id="restaurant-orders">
                   <div className="order-panel-toolbar">
                     <div>
@@ -4837,9 +4916,11 @@ export default function RestaurantsPage() {
                     </div>
                   )}
                 </div>
+                ) : null}
               </section>
+              ) : null}
 
-              {data?.canManageRestaurant ? (
+              {workspaceView === "floor" && data?.canManageRestaurant ? (
                 <section className="notice-panel compact-panel">
                   <p className="eyebrow">Add table</p>
                   <form className="restaurant-order-form" onSubmit={createTable}>
@@ -4863,6 +4944,7 @@ export default function RestaurantsPage() {
           ) : null}
         </div>
       </section>
+      ) : null}
     </div>
   );
 }
