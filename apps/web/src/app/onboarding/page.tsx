@@ -11,6 +11,10 @@ import { Building2, Check, Hotel, Utensils } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
+import {
+  SafeSignOutButton,
+  userButtonWithoutSignOutAppearance,
+} from "../components/safe-sign-out-button";
 
 type OperatingModel = "hotel_only" | "hotel_restaurant";
 
@@ -141,7 +145,11 @@ export default function OnboardingPage() {
               afterLeaveOrganizationUrl="/"
               afterSelectOrganizationUrl="/onboarding"
             />
-            <UserButton afterSignOutUrl="/" />
+            <UserButton
+              appearance={userButtonWithoutSignOutAppearance}
+              signInUrl="/sign-in"
+            />
+            <SafeSignOutButton />
           </div>
           <p className="eyebrow">Tenant onboarding</p>
           <h1>Set up your operating workspace</h1>

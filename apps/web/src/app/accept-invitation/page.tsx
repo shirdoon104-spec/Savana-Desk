@@ -12,6 +12,10 @@ import { Building2 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import {
+  SafeSignOutButton,
+  userButtonWithoutSignOutAppearance,
+} from "../components/safe-sign-out-button";
 
 function SignedInInviteState() {
   const { user } = useUser();
@@ -33,7 +37,11 @@ function SignedInInviteState() {
         <Link className="button-link" href="/app">
           Continue to Rayaan
         </Link>
-        <UserButton afterSignOutUrl="/sign-in" />
+        <UserButton
+          appearance={userButtonWithoutSignOutAppearance}
+          signInUrl="/sign-in"
+        />
+        <SafeSignOutButton />
       </div>
     </div>
   );

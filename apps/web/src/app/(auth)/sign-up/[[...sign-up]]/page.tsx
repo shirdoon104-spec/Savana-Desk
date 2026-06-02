@@ -1,4 +1,5 @@
 import { SignUp } from "@clerk/nextjs";
+import { AuthAutocompleteGuard } from "../../components/auth-autocomplete-guard";
 import { ClerkUnavailable } from "../../components/clerk-unavailable";
 
 export default function SignUpPage() {
@@ -8,8 +9,10 @@ export default function SignUpPage() {
 
   return (
     <main className="auth-page">
+      <AuthAutocompleteGuard />
       <SignUp
         fallbackRedirectUrl="/onboarding"
+        oidcPrompt="select_account"
         oauthFlow="redirect"
         path="/sign-up"
         routing="path"

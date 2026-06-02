@@ -1,6 +1,10 @@
 "use client";
 
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
+import {
+  SafeSignOutButton,
+  userButtonWithoutSignOutAppearance,
+} from "../../components/safe-sign-out-button";
 
 export function AccountControls() {
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
@@ -14,7 +18,11 @@ export function AccountControls() {
         afterLeaveOrganizationUrl="/"
         afterSelectOrganizationUrl="/app"
       />
-      <UserButton afterSignOutUrl="/" />
+      <UserButton
+        appearance={userButtonWithoutSignOutAppearance}
+        signInUrl="/sign-in"
+      />
+      <SafeSignOutButton />
     </div>
   );
 }
