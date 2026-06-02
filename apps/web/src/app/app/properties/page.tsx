@@ -428,7 +428,15 @@ export default function PropertiesPage() {
 
       {error ? <div className="form-error">{error}</div> : null}
 
-      <section className="status-grid property-stats">
+      <nav aria-label="Property workspace" className="workbench-jump-nav">
+        <a href="#property-summary">Summary</a>
+        <a href="#property-selector">Properties</a>
+        <a href="#room-inventory">Rooms</a>
+        <a href="#add-rooms">Add rooms</a>
+        <a href="#new-property">New property</a>
+      </nav>
+
+      <section className="status-grid property-stats" id="property-summary">
         <div>
           <span>Properties</span>
           <strong>{data?.properties.length ?? 0}</strong>
@@ -453,7 +461,7 @@ export default function PropertiesPage() {
       </section>
 
       <section className="property-layout">
-        <div className="property-list">
+        <div className="property-list" id="property-selector">
           {(data?.properties ?? []).map((property) => (
             <button
               className="property-card"
@@ -479,7 +487,7 @@ export default function PropertiesPage() {
         <div className="property-detail">
           {selectedProperty ? (
             <>
-              <section className="notice-panel property-detail-card">
+              <section className="notice-panel property-detail-card" id="room-inventory">
                 <p className="eyebrow">Room inventory</p>
                 <h2>{selectedProperty.name}</h2>
                 <p>
@@ -669,7 +677,7 @@ export default function PropertiesPage() {
               </section>
 
               {data?.canManageProperties ? (
-                <section className="notice-panel compact-panel">
+                <section className="notice-panel compact-panel" id="add-rooms">
                   <p className="eyebrow">Add rooms</p>
                   <form className="inventory-form" onSubmit={createRooms}>
                     <label>
@@ -722,7 +730,7 @@ export default function PropertiesPage() {
       </section>
 
       {data?.canManageProperties ? (
-        <section className="notice-panel compact-panel">
+        <section className="notice-panel compact-panel" id="new-property">
           <p className="eyebrow">New property</p>
           <form className="inventory-form" onSubmit={createProperty}>
             <label>

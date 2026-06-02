@@ -1,6 +1,13 @@
 "use client";
 
-import { CheckCircle2, Minus, Plus, ShoppingBag, Utensils } from "lucide-react";
+import {
+  CalendarClock,
+  CheckCircle2,
+  Minus,
+  Plus,
+  ShoppingBag,
+  Utensils,
+} from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -52,6 +59,14 @@ interface PublicOrderResponse {
   totalAmount: number;
 }
 
+interface PublicReservationResponse {
+  guestName: string;
+  id: string;
+  partySize: number;
+  scheduledAt: string;
+  status: string;
+}
+
 async function readApiMessage(response: Response, fallback: string) {
   try {
     const payload = (await response.json()) as { message?: string | string[] };
@@ -78,8 +93,20 @@ export default function PublicMenuPage() {
   const [guestName, setGuestName] = useState("");
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [orderItems, setOrderItems] = useState<Record<string, number>>({});
+  const [orderRequestKey, setOrderRequestKey] = useState(() => crypto.randomUUID());
+  const [reservationNotes, setReservationNotes] = useState("");
+  const [reservationPartySize, setReservationPartySize] = useState("2");
+  const [reservationRequestKey, setReservationRequestKey] = useState(() =>
+    crypto.randomUUID(),
+  );
+  const [reservationScheduledAt, setReservationScheduledAt] = useState(
+    new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
+  );
   const [submittedOrder, setSubmittedOrder] = useState<PublicOrderResponse | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittedReservation, setSubmittedReservation] =
+    useState<PublicReservationResponse | null>(null);
+  const [isOrderSubmitting, setIsOrderSubmitting] = useState(false);
+  const [isReservationSubmitting, setIsReservationSubmitting] = useState(false);
 
   const selectedItems = useMemo(
     () =>
@@ -126,6 +153,7 @@ export default function PublicMenuPage() {
 
   function updateQuantity(menuItemId: string, delta: number) {
     setSubmittedOrder(null);
+    setSubmittedReservation(null);
     setOrderItems((current) => {
       const quantity = Math.max(0, (current[menuItemId] ?? 0) + delta);
       const next = { ...current };
@@ -141,38 +169,102 @@ export default function PublicMenuPage() {
   }
 
   async function submitOrder() {
-    if (!selectedItems.length || isSubmitting) {
+    if (!selectedItems.length || isOrderSubmitting || isReservationSubmitting) {
       return;
     }
 
-    setIsSubmitting(true);
+    setIsOrderSubmitting(true);
+    setError(null);
+    setSubmittedReservation(null);
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/public/menu/${params.restaurantId}/${params.tableId}/orders`,
+        {
+          body: JSON.stringify({
+            guestName: guestName.trim() || undefined,
+            idempotencyKey: orderRequestKey,
+            items: selectedItems.map((item) => ({
+              menuItemId: item.menuItem.id,
+              quantity: item.quantity,
+            })),
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        setError(await readApiMessage(response, "Could not send your order."));
+        return;
+      }
+
+      setSubmittedOrder((await response.json()) as PublicOrderResponse);
+      setOrderItems({});
+      setOrderRequestKey(crypto.randomUUID());
+    } catch {
+      setError("Could not reach the restaurant. Please try again.");
+    } finally {
+      setIsOrderSubmitting(false);
+    }
+  }
+
+  async function submitReservation() {
+    if (isOrderSubmitting || isReservationSubmitting) {
+      return;
+    }
+
+    const scheduledAt = new Date(reservationScheduledAt);
+
+    if (Number.isNaN(scheduledAt.getTime())) {
+      setError("Choose a valid reservation date and time.");
+      return;
+    }
+
+    const name = guestName.trim() || "Guest";
+
+    setIsReservationSubmitting(true);
     setError(null);
 
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/public/menu/${params.restaurantId}/${params.tableId}/orders`,
-      {
-        body: JSON.stringify({
-          guestName: guestName || undefined,
-          idempotencyKey: crypto.randomUUID(),
-          items: selectedItems.map((item) => ({
-            menuItemId: item.menuItem.id,
-            quantity: item.quantity,
-          })),
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      },
-    );
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/public/menu/${params.restaurantId}/${params.tableId}/reservations`,
+        {
+          body: JSON.stringify({
+            guestName: name,
+            idempotencyKey: reservationRequestKey,
+            items: selectedItems.map((item) => ({
+              menuItemId: item.menuItem.id,
+              quantity: item.quantity,
+            })),
+            notes: reservationNotes.trim() || undefined,
+            partySize: Number(reservationPartySize) || 1,
+            scheduledAt: scheduledAt.toISOString(),
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        },
+      );
 
-    setIsSubmitting(false);
+      if (!response.ok) {
+        setError(await readApiMessage(response, "Could not request your reservation."));
+        return;
+      }
 
-    if (!response.ok) {
-      setError(await readApiMessage(response, "Could not send your order."));
-      return;
+      setSubmittedReservation((await response.json()) as PublicReservationResponse);
+      setGuestName("");
+      setOrderItems({});
+      setReservationNotes("");
+      setReservationPartySize("2");
+      setReservationRequestKey(crypto.randomUUID());
+      setReservationScheduledAt(
+        new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
+      );
+    } catch {
+      setError("Could not reach the restaurant. Please try again.");
+    } finally {
+      setIsReservationSubmitting(false);
     }
-
-    setSubmittedOrder((await response.json()) as PublicOrderResponse);
-    setOrderItems({});
   }
 
   if (loadState === "loading" || loadState === "idle") {
@@ -214,6 +306,19 @@ export default function PublicMenuPage() {
             <strong>Order sent for waiter confirmation</strong>
             <span>
               {submittedOrder.currency} {submittedOrder.totalAmount.toFixed(2)}
+            </span>
+          </div>
+        </section>
+      ) : null}
+      {submittedReservation ? (
+        <section className="public-order-success">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <strong>Reservation request sent</strong>
+            <span>
+              {submittedReservation.partySize} guest
+              {submittedReservation.partySize === 1 ? "" : "s"} -{" "}
+              {new Date(submittedReservation.scheduledAt).toLocaleString()}
             </span>
           </div>
         </section>
@@ -347,7 +452,10 @@ export default function PublicMenuPage() {
           <label>
             Name
             <input
-              onChange={(event) => setGuestName(event.target.value)}
+              onChange={(event) => {
+                setGuestName(event.target.value);
+                setSubmittedReservation(null);
+              }}
               placeholder="Optional"
               value={guestName}
             />
@@ -373,13 +481,64 @@ export default function PublicMenuPage() {
             </strong>
           </div>
           <button
-            disabled={!selectedItems.length || isSubmitting}
+            disabled={
+              !selectedItems.length || isOrderSubmitting || isReservationSubmitting
+            }
             onClick={submitOrder}
             type="button"
           >
             <ShoppingBag aria-hidden="true" />
-            Send order
+            {isOrderSubmitting ? "Sending..." : "Send order"}
           </button>
+
+          <div className="public-reservation-panel">
+            <div>
+              <CalendarClock aria-hidden="true" />
+              <strong>Request a reservation</strong>
+            </div>
+            <label>
+              Guests
+              <input
+                min="1"
+                onChange={(event) => {
+                  setReservationPartySize(event.target.value);
+                  setSubmittedReservation(null);
+                }}
+                type="number"
+                value={reservationPartySize}
+              />
+            </label>
+            <label>
+              Date and time
+              <input
+                onChange={(event) => {
+                  setReservationScheduledAt(event.target.value);
+                  setSubmittedReservation(null);
+                }}
+                type="datetime-local"
+                value={reservationScheduledAt}
+              />
+            </label>
+            <label>
+              Notes
+              <input
+                onChange={(event) => {
+                  setReservationNotes(event.target.value);
+                  setSubmittedReservation(null);
+                }}
+                placeholder="Occasion or preference"
+                value={reservationNotes}
+              />
+            </label>
+            <button
+              disabled={isOrderSubmitting || isReservationSubmitting}
+              onClick={submitReservation}
+              type="button"
+            >
+              <CalendarClock aria-hidden="true" />
+              {isReservationSubmitting ? "Sending..." : "Request reservation"}
+            </button>
+          </div>
         </aside>
       </section>
     </main>

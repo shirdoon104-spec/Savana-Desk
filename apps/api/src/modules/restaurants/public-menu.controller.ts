@@ -9,6 +9,7 @@ import {
 import { Type } from "class-transformer";
 import {
   IsArray,
+  IsDateString,
   IsInt,
   IsOptional,
   IsString,
@@ -51,6 +52,35 @@ class CreatePublicOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PublicOrderItemDto)
   items!: PublicOrderItemDto[];
+}
+
+class CreatePublicReservationDto {
+  @IsString()
+  @MaxLength(80)
+  guestName!: string;
+
+  @IsUUID()
+  @IsOptional()
+  idempotencyKey?: string;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => PublicOrderItemDto)
+  items?: PublicOrderItemDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  notes?: string;
+
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  partySize!: number;
+
+  @IsDateString()
+  scheduledAt!: string;
 }
 
 @Controller("public/menu")
@@ -122,21 +152,17 @@ export class PublicMenuController {
       }
     }
 
-    const activeOrder = await this.prisma.order.findFirst({
+    const activeQrDraft = await this.prisma.order.findFirst({
       where: {
+        notes: { startsWith: "QR guest" },
         restaurantId: restaurant.id,
-        status: { notIn: ["closed", "cancelled"] },
+        status: "draft",
         tableId: table.id,
         tenantId: restaurant.tenantId,
       },
-      select: { id: true },
+      include: { items: true },
+      orderBy: { createdAt: "desc" },
     });
-
-    if (activeOrder) {
-      throw new BadRequestException(
-        "This table already has an open order. Please ask staff to add items.",
-      );
-    }
 
     const menuItems = await this.prisma.menuItem.findMany({
       include: { category: true },
@@ -183,14 +209,90 @@ export class PublicMenuController {
       (total, item) => total.plus(item.totalPrice),
       new Prisma.Decimal(0),
     );
+    if (activeQrDraft && body.idempotencyKey) {
+      const existingAppend = await this.prisma.orderAuditLog.findFirst({
+        where: {
+          event: "item_added",
+          newState: {
+            path: ["idempotencyKey"],
+            equals: body.idempotencyKey,
+          },
+          orderId: activeQrDraft.id,
+          tenantId: restaurant.tenantId,
+        },
+      });
+
+      if (existingAppend) {
+        return serializePublicOrder(activeQrDraft);
+      }
+    }
+
+    const existingSubtotal = activeQrDraft
+      ? activeQrDraft.items
+          .filter((item) => item.status !== "voided")
+          .reduce(
+            (total, item) => total.plus(item.totalPrice),
+            new Prisma.Decimal(0),
+          )
+      : new Prisma.Decimal(0);
     const totals = await this.orderTotals.calculateForRestaurant(
       this.prisma,
       restaurant.tenantId,
       restaurant.id,
-      subtotal,
+      existingSubtotal.plus(subtotal),
     );
 
     const order = await this.prisma.$transaction(async (tx) => {
+      if (activeQrDraft) {
+        await tx.orderItem.createMany({
+          data: itemRows.map((item) => ({
+            ...item,
+            orderId: activeQrDraft.id,
+          })),
+        });
+
+        await tx.order.update({
+          where: { id: activeQrDraft.id },
+          data: {
+            discountAmount: totals.discountAmount,
+            serviceChargeAmount: totals.serviceChargeAmount,
+            serviceChargeRate: totals.serviceChargeRate,
+            subtotal: totals.subtotal,
+            totalAmount: totals.totalAmount,
+            taxAmount: totals.taxAmount,
+            taxRate: totals.taxRate,
+          },
+        });
+
+        await tx.orderAuditLog.create({
+          data: {
+            actorId: null,
+            actorRole: "guest",
+            event: "item_added",
+            newState: toPrismaJson({
+              idempotencyKey: body.idempotencyKey ?? null,
+              itemCount: itemRows.length,
+              source: "qr_table_ordering",
+              totalAmount: totals.totalAmount.toString(),
+            }),
+            orderId: activeQrDraft.id,
+            propertyId: restaurant.propertyId,
+            restaurantId: restaurant.id,
+            tenantId: restaurant.tenantId,
+          },
+        });
+
+        await tx.restaurantTable.update({
+          where: { id: table.id },
+          data: { status: "ordering" },
+        });
+
+        return tx.order.findUniqueOrThrow({
+          where: { id: activeQrDraft.id },
+          include: { items: { orderBy: { createdAt: "asc" } } },
+        });
+      }
+
       const order = await tx.order.create({
         data: {
           currency: restaurant.property.currency,
@@ -243,6 +345,96 @@ export class PublicMenuController {
     });
 
     return serializePublicOrder(order);
+  }
+
+  @Post(":restaurantId/:tableId/reservations")
+  async createReservation(
+    @Param("restaurantId") restaurantId: string,
+    @Param("tableId") tableId: string,
+    @Body() body: CreatePublicReservationDto,
+  ) {
+    const guestName = body.guestName.trim() || "Guest";
+
+    const table = await this.findPublicTable(restaurantId, tableId);
+    const restaurant = table.restaurant;
+    const requestedItems = body.items ?? [];
+    const guestSourceId = body.idempotencyKey
+      ? `public-menu:${body.idempotencyKey}`
+      : "public-menu";
+
+    if (body.idempotencyKey) {
+      const existingReservation = await this.prisma.reservation.findFirst({
+        where: {
+          guestId: guestSourceId,
+          restaurantId: restaurant.id,
+          tenantId: restaurant.tenantId,
+        },
+        include: { items: { orderBy: { createdAt: "asc" } } },
+      });
+
+      if (existingReservation) {
+        return serializePublicReservation(existingReservation);
+      }
+    }
+
+    const menuItems = requestedItems.length
+      ? await this.prisma.menuItem.findMany({
+          where: {
+            id: { in: requestedItems.map((item) => item.menuItemId) },
+            isActive: true,
+            isAvailable: true,
+            restaurantId: restaurant.id,
+            tenantId: restaurant.tenantId,
+          },
+        })
+      : [];
+
+    if (requestedItems.length && menuItems.length !== uniqueMenuItemIdCount(requestedItems)) {
+      throw new BadRequestException("One or more requested menu items are unavailable.");
+    }
+
+    assertMenuItemsHaveStock(menuItems, requestedItems);
+
+    const itemRows = requestedItems.map((item) => {
+      const menuItem = menuItems.find((candidate) => candidate.id === item.menuItemId);
+
+      if (!menuItem) {
+        throw new BadRequestException("One or more requested menu items were not found.");
+      }
+
+      const unitPrice = new Prisma.Decimal(menuItem.price);
+      const totalPrice = unitPrice.mul(item.quantity);
+
+      return {
+        menuItemId: menuItem.id,
+        name: menuItem.name,
+        notes: item.notes?.trim() || null,
+        propertyId: restaurant.propertyId,
+        quantity: item.quantity,
+        tenantId: restaurant.tenantId,
+        totalPrice,
+        unitPrice,
+      };
+    });
+
+    const reservation = await this.prisma.reservation.create({
+      data: {
+        guestId: guestSourceId,
+        guestName,
+        items: itemRows.length ? { create: itemRows } : undefined,
+        notes: body.notes?.trim() || null,
+        partySize: body.partySize,
+        propertyId: restaurant.propertyId,
+        restaurantId: restaurant.id,
+        scheduledAt: new Date(body.scheduledAt),
+        status: "waitlisted",
+        tableId: null,
+        tenantId: restaurant.tenantId,
+      },
+      include: { items: { orderBy: { createdAt: "asc" } } },
+    });
+
+    return serializePublicReservation(reservation);
   }
 
   private async findPublicTable(restaurantId: string, tableId: string) {
@@ -335,6 +527,34 @@ function serializePublicOrder(order: {
     })),
     status: order.status,
     totalAmount: Number(order.totalAmount),
+  };
+}
+
+function serializePublicReservation(reservation: {
+  guestName: string;
+  id: string;
+  items: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    totalPrice: Prisma.Decimal;
+  }>;
+  partySize: number;
+  scheduledAt: Date;
+  status: string;
+}) {
+  return {
+    guestName: reservation.guestName,
+    id: reservation.id,
+    items: reservation.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      quantity: item.quantity,
+      totalPrice: Number(item.totalPrice),
+    })),
+    partySize: reservation.partySize,
+    scheduledAt: reservation.scheduledAt,
+    status: reservation.status,
   };
 }
 

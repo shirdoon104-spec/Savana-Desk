@@ -552,7 +552,12 @@ export default function KitchenPage() {
 
       {error ? <div className="form-error">{error}</div> : null}
 
-      <section className="status-grid property-stats">
+      <nav aria-label="Kitchen workspace" className="workbench-jump-nav">
+        <a href="#kitchen-summary">Summary</a>
+        <a href="#kitchen-board">Stations</a>
+      </nav>
+
+      <section className="status-grid property-stats" id="kitchen-summary">
         <div>
           <span>Queued</span>
           <strong>{tickets.filter((ticket) => ticket.status === "sent").length}</strong>
@@ -573,7 +578,7 @@ export default function KitchenPage() {
         </div>
       </section>
 
-      <section className="kitchen-board">
+      <section className="kitchen-board" id="kitchen-board">
         {stations.map((station) => (
           <div className="notice-panel kitchen-column" key={station.type}>
             <div className="kitchen-column-header">

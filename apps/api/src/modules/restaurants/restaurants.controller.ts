@@ -289,6 +289,11 @@ class CreateOrderDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(180)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(128)
   tableId?: string;
 
@@ -443,7 +448,7 @@ class TransferTableDto {
 
 class CreateReservationDto {
   @IsString()
-  @MinLength(2)
+  @MinLength(1)
   @MaxLength(120)
   guestName!: string;
 
@@ -1378,6 +1383,7 @@ export class RestaurantsController {
               }
             : undefined,
           discountAmount: totals.discountAmount,
+          notes: body.notes?.trim() || null,
           propertyId: restaurant.propertyId,
           restaurantId: restaurant.id,
           serviceChargeAmount: totals.serviceChargeAmount,
@@ -3135,6 +3141,7 @@ export class RestaurantsController {
   private serializeReservation(
     reservation: {
       createdAt: Date;
+      guestId: string | null;
       guestName: string;
       id: string;
       items?: Array<{
@@ -3179,6 +3186,7 @@ export class RestaurantsController {
 
     return {
       createdAt: reservation.createdAt,
+      guestId: reservation.guestId,
       guestName: reservation.guestName,
       id: reservation.id,
       items: (reservation.items ?? []).map((item) => ({

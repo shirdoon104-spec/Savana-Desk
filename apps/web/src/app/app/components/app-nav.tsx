@@ -3,6 +3,7 @@
 import { useAuth, useOrganization } from "@clerk/nextjs";
 import { Building2, ChefHat, LayoutDashboard, Settings, Utensils } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type TenantRole =
@@ -49,6 +50,7 @@ function canUseKitchen(role: TenantRole | null) {
 export function AppNav() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
+  const pathname = usePathname();
   const [role, setRole] = useState<TenantRole | null>(null);
 
   useEffect(() => {
@@ -87,30 +89,30 @@ export function AppNav() {
 
   return (
     <nav>
-      <Link href="/app">
+      <Link data-active={pathname === "/app"} href="/app">
         <LayoutDashboard aria-hidden="true" />
         Dashboard
       </Link>
       {canNavigate(role, "property.read") ? (
-        <Link href="/app/properties">
+        <Link data-active={pathname.startsWith("/app/properties")} href="/app/properties">
           <Building2 aria-hidden="true" />
           Properties
         </Link>
       ) : null}
       {canNavigate(role, "restaurant.read") ? (
-        <Link href="/app/restaurants">
+        <Link data-active={pathname.startsWith("/app/restaurants")} href="/app/restaurants">
           <Utensils aria-hidden="true" />
           Restaurants
         </Link>
       ) : null}
       {canUseKitchen(role) ? (
-        <Link href="/app/kitchen">
+        <Link data-active={pathname.startsWith("/app/kitchen")} href="/app/kitchen">
           <ChefHat aria-hidden="true" />
           Kitchen
         </Link>
       ) : null}
       {canNavigate(role, "staff.read") ? (
-        <Link href="/app/settings">
+        <Link data-active={pathname.startsWith("/app/settings")} href="/app/settings">
           <Settings aria-hidden="true" />
           Settings
         </Link>

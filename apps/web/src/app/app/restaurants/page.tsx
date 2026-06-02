@@ -23,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   countQueuedRestaurantActions,
   enqueueRestaurantAction,
@@ -122,6 +122,7 @@ interface RestaurantResponse {
     };
     reservations: Array<{
       createdAt: string;
+      guestId: string | null;
       guestName: string;
       id: string;
       items: Array<{
@@ -375,6 +376,7 @@ function getRestaurantDeviceId() {
 }
 
 export default function RestaurantsPage() {
+  const orderBuilderRef = useRef<HTMLFormElement | null>(null);
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
   const { user } = useUser();
@@ -406,9 +408,17 @@ export default function RestaurantsPage() {
   );
   const [reservationStatus, setReservationStatus] = useState("confirmed");
   const [reservationTableId, setReservationTableId] = useState("");
+  const [reservationListFilter, setReservationListFilter] = useState<
+    "all" | "guest" | "waitlist"
+  >("all");
   const [reservationItems, setReservationItems] = useState<
     Array<{ menuItemId: string; notes: string; quantity: number }>
   >([]);
+  const [editingReservationId, setEditingReservationId] = useState<string | null>(null);
+  const [confirmingReservationCancelId, setConfirmingReservationCancelId] =
+    useState<string | null>(null);
+  const [confirmingGuestRejectOrderId, setConfirmingGuestRejectOrderId] =
+    useState<string | null>(null);
   const [isReservationModalOpen, setIsReservationModalOpen] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState("");
   const [tableCoverCount, setTableCoverCount] = useState("0");
@@ -420,6 +430,7 @@ export default function RestaurantsPage() {
   const [orderItemQuantity, setOrderItemQuantity] = useState("1");
   const [orderMenuSearch, setOrderMenuSearch] = useState("");
   const [selectedMenuCategoryId, setSelectedMenuCategoryId] = useState("all");
+  const [reservationOrderSource, setReservationOrderSource] = useState<string | null>(null);
   const [orderItems, setOrderItems] = useState<
     Array<{ menuItemId: string; notes: string; quantity: number }>
   >([]);
@@ -511,6 +522,65 @@ export default function RestaurantsPage() {
     );
   }
 
+  function updateReservationItemNotes(index: number, notes: string) {
+    setReservationItems((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, notes } : item,
+      ),
+    );
+  }
+
+  function removeReservationItem(index: number) {
+    setReservationItems((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index),
+    );
+  }
+
+  function resetReservationForm() {
+    setEditingReservationId(null);
+    setReservationGuestName("");
+    setReservationNotes("");
+    setReservationPartySize("2");
+    setReservationStatus("confirmed");
+    setReservationTableId("");
+    setReservationItems([]);
+    setReservationScheduledAt(
+      new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
+    );
+  }
+
+  function openNewReservationModal() {
+    resetReservationForm();
+    setIsReservationModalOpen(true);
+  }
+
+  function closeReservationModal() {
+    setIsReservationModalOpen(false);
+    resetReservationForm();
+  }
+
+  function openEditReservationModal(
+    reservation: RestaurantResponse["restaurants"][number]["reservations"][number],
+  ) {
+    setEditingReservationId(reservation.id);
+    setReservationGuestName(reservation.guestName);
+    setReservationNotes(reservation.notes ?? "");
+    setReservationPartySize(reservation.partySize.toString());
+    setReservationScheduledAt(new Date(reservation.scheduledAt).toISOString().slice(0, 16));
+    setReservationStatus(reservation.status);
+    setReservationTableId(reservation.tableId ?? "");
+    setReservationItems(
+      reservation.items
+        .filter((item) => item.menuItemId)
+        .map((item) => ({
+          menuItemId: item.menuItemId as string,
+          notes: item.notes ?? "",
+          quantity: item.quantity,
+        })),
+    );
+    setIsReservationModalOpen(true);
+  }
+
   const reportQuery = useMemo(() => {
     const params = new URLSearchParams();
 
@@ -556,10 +626,12 @@ export default function RestaurantsPage() {
       return null;
     }
 
+    const tableOrders = ordersByTable.get(selectedTable.id) ?? [];
+
     return (
-      (ordersByTable.get(selectedTable.id) ?? []).find(
-        (order) => !isCompletedOrder(order.status),
-      ) ?? null
+      tableOrders.find((order) => !isCompletedOrder(order.status) && isGuestQrOrder(order)) ??
+      tableOrders.find((order) => !isCompletedOrder(order.status)) ??
+      null
     );
   }, [ordersByTable, selectedTable]);
 
@@ -581,9 +653,19 @@ export default function RestaurantsPage() {
   );
   const activeOrders = useMemo(
     () =>
-      (selectedRestaurant?.orders ?? []).filter(
-        (order) => !isCompletedOrder(order.status),
-      ),
+      [...(selectedRestaurant?.orders ?? [])]
+        .filter((order) => !isCompletedOrder(order.status))
+        .sort((left, right) => {
+          if (isGuestQrOrder(left) && !isGuestQrOrder(right)) {
+            return -1;
+          }
+
+          if (!isGuestQrOrder(left) && isGuestQrOrder(right)) {
+            return 1;
+          }
+
+          return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+        }),
     [selectedRestaurant?.orders],
   );
   const upcomingReservations = useMemo(
@@ -593,6 +675,50 @@ export default function RestaurantsPage() {
       ),
     [selectedRestaurant?.reservations],
   );
+  const guestRequestCount = useMemo(
+    () =>
+      upcomingReservations.filter((reservation) =>
+        reservation.guestId?.startsWith("public-menu"),
+      ).length,
+    [upcomingReservations],
+  );
+  const waitlistedReservationCount = useMemo(
+    () =>
+      upcomingReservations.filter(
+        (reservation) => reservation.status === "waitlisted",
+      ).length,
+    [upcomingReservations],
+  );
+  const visibleReservations = useMemo(() => {
+    if (reservationListFilter === "guest") {
+      return upcomingReservations.filter((reservation) =>
+        reservation.guestId?.startsWith("public-menu"),
+      );
+    }
+
+    if (reservationListFilter === "waitlist") {
+      return upcomingReservations.filter(
+        (reservation) => reservation.status === "waitlisted",
+      );
+    }
+
+    return upcomingReservations;
+  }, [reservationListFilter, upcomingReservations]);
+  const reservationItemTotal = useMemo(
+    () =>
+      reservationItems.reduce((total, item) => {
+        const menuItem = selectedRestaurant?.menuItems.find(
+          (candidate) => candidate.id === item.menuItemId,
+        );
+
+        return total + (menuItem?.price ?? 0) * item.quantity;
+      }, 0),
+    [reservationItems, selectedRestaurant?.menuItems],
+  );
+  const reservationCurrency =
+    selectedRestaurant?.menuItems[0]?.currency ??
+    selectedRestaurant?.orders[0]?.currency ??
+    "USD";
   const completedOrders = useMemo(
     () =>
       (selectedRestaurant?.orders ?? []).filter((order) =>
@@ -1440,6 +1566,8 @@ export default function RestaurantsPage() {
 
     const token = await getOrganizationToken();
     const restaurantId = selectedRestaurant?.id;
+    const guestName = reservationGuestName.trim();
+    const notes = reservationNotes.trim();
 
     if (!token || !restaurantId) {
       setError("Choose a restaurant before creating reservations.");
@@ -1447,40 +1575,50 @@ export default function RestaurantsPage() {
       return;
     }
 
+    if (!guestName) {
+      setError("Enter a guest name before saving the booking.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const reservationPayload = {
+      guestName,
+      notes: notes || undefined,
+      items: reservationItems,
+      partySize: Number(reservationPartySize),
+      scheduledAt: new Date(reservationScheduledAt).toISOString(),
+      status: reservationStatus,
+      tableId: reservationTableId || undefined,
+    };
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/reservations`,
+      editingReservationId
+        ? `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/reservations/${editingReservationId}`
+        : `${process.env.NEXT_PUBLIC_API_URL}/restaurants/${restaurantId}/reservations`,
       {
-        body: JSON.stringify({
-          guestName: reservationGuestName,
-          notes: reservationNotes || undefined,
-          items: reservationItems,
-          partySize: Number(reservationPartySize),
-          scheduledAt: new Date(reservationScheduledAt).toISOString(),
-          status: reservationStatus,
-          tableId: reservationTableId || undefined,
-        }),
+        body: JSON.stringify(reservationPayload),
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        method: "POST",
+        method: editingReservationId ? "PATCH" : "POST",
       },
     );
 
     setIsSubmitting(false);
 
     if (!response.ok) {
-      setError(await readApiMessage(response, "Could not create reservation."));
+      setError(
+        await readApiMessage(
+          response,
+          editingReservationId
+            ? "Could not update reservation."
+            : "Could not create reservation.",
+        ),
+      );
       return;
     }
 
-    setReservationGuestName("");
-    setReservationNotes("");
-    setReservationPartySize("2");
-    setReservationStatus("confirmed");
-    setReservationTableId("");
-    setReservationItems([]);
-    setIsReservationModalOpen(false);
+    closeReservationModal();
     await loadRestaurants();
   }
 
@@ -1493,7 +1631,7 @@ export default function RestaurantsPage() {
 
     if (!token || !restaurantId) {
       setError("Choose a restaurant before updating reservations.");
-      return;
+      return false;
     }
 
     const response = await fetch(
@@ -1510,10 +1648,62 @@ export default function RestaurantsPage() {
 
     if (!response.ok) {
       setError(await readApiMessage(response, "Could not update reservation."));
-      return;
+      return false;
     }
 
     await loadRestaurants();
+    return true;
+  }
+
+  async function startReservationOrder(
+    reservation: RestaurantResponse["restaurants"][number]["reservations"][number],
+  ) {
+    if (!selectedRestaurant) {
+      setError("Choose a restaurant before starting reservation orders.");
+      return;
+    }
+
+    if (orderItems.length) {
+      setError("Send or clear the current order before loading a reservation.");
+      return;
+    }
+
+    const tableId = reservation.tableId || reservation.suggestedTables[0]?.id || "";
+    const requestedItems = reservation.items
+      .filter((item) => item.menuItemId)
+      .map((item) => ({
+        menuItemId: item.menuItemId as string,
+        notes: item.notes ?? "",
+        quantity: item.quantity,
+      }));
+
+    if (tableId || reservation.status !== "seated") {
+      const didUpdateReservation = await updateReservation(reservation.id, {
+        status: "seated",
+        tableId,
+      });
+
+      if (!didUpdateReservation) {
+        return;
+      }
+    }
+
+    setOrderTableId(tableId);
+    setOrderItems(requestedItems);
+    setOrderMenuSearch("");
+    setSelectedMenuCategoryId("all");
+    setReservationOrderSource(reservation.guestName);
+    setError(
+      requestedItems.length
+        ? "Reservation items loaded into the current order."
+        : "Reservation seated. Add items to the current order.",
+    );
+    window.setTimeout(() => {
+      orderBuilderRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
   }
 
   async function updateTableStatus(tableId: string, status: string) {
@@ -1607,6 +1797,9 @@ export default function RestaurantsPage() {
     const payload = {
       idempotencyKey,
       items: orderItems,
+      notes: reservationOrderSource
+        ? `Reservation: ${reservationOrderSource}`
+        : undefined,
       tableId: orderTableId || undefined,
     };
 
@@ -1630,6 +1823,7 @@ export default function RestaurantsPage() {
       setQueuedActionCount(await countQueuedRestaurantActions());
       setOrderItems([]);
       setOrderTableId("");
+      setReservationOrderSource(null);
       setIsSubmitting(false);
       setError("Offline order queued. It will sync when the connection is restored.");
       return;
@@ -1675,6 +1869,7 @@ export default function RestaurantsPage() {
       setQueuedActionCount(await countQueuedRestaurantActions());
       setOrderItems([]);
       setOrderTableId("");
+      setReservationOrderSource(null);
       setIsSubmitting(false);
       setError("Network dropped. Order queued locally for sync.");
       return;
@@ -1682,6 +1877,7 @@ export default function RestaurantsPage() {
 
     setOrderItems([]);
     setOrderTableId("");
+    setReservationOrderSource(null);
     await loadRestaurants();
   }
 
@@ -1775,6 +1971,10 @@ export default function RestaurantsPage() {
     if (!response.ok) {
       setError(await readApiMessage(response, "Could not update order."));
       return;
+    }
+
+    if (confirmingGuestRejectOrderId === orderId) {
+      setConfirmingGuestRejectOrderId(null);
     }
 
     await loadRestaurants();
@@ -2475,6 +2675,15 @@ export default function RestaurantsPage() {
 
       {error ? <div className="form-error">{error}</div> : null}
 
+      <nav aria-label="Restaurant workspace" className="workbench-jump-nav">
+        <a href="#restaurant-insights">Insights</a>
+        <a href="#restaurant-floor">Floor</a>
+        <a href="#restaurant-reservations">Bookings</a>
+        <a href="#restaurant-menu">Menu</a>
+        <a href="#restaurant-pos">POS</a>
+        <a href="#restaurant-orders">Orders</a>
+      </nav>
+
       {frontOfHouseNotifications.length ? (
         <section aria-live="polite" className="foh-notification-panel">
           <div className="foh-notification-header">
@@ -2558,7 +2767,7 @@ export default function RestaurantsPage() {
       ) : null}
 
       {data?.canManageRestaurant && selectedRestaurant ? (
-        <section className="restaurant-report-panel">
+        <section className="restaurant-report-panel" id="restaurant-insights">
           <div>
             <BarChart3 aria-hidden="true" />
             <div>
@@ -2609,7 +2818,7 @@ export default function RestaurantsPage() {
       ) : null}
 
       {data?.canManageRestaurant && liveDashboard ? (
-        <section className="live-dashboard-panel">
+        <section className="live-dashboard-panel" id="restaurant-live">
           <div className="live-dashboard-header">
             <BarChart3 aria-hidden="true" />
             <div>
@@ -2777,7 +2986,7 @@ export default function RestaurantsPage() {
 
           {selectedRestaurant ? (
             <>
-              <section className="notice-panel property-detail-card pos-floor-section">
+              <section className="notice-panel property-detail-card pos-floor-section" id="restaurant-floor">
                 <div className="pos-floor-header">
                   <div>
                     <p className="eyebrow">Floor map</p>
@@ -2887,13 +3096,32 @@ export default function RestaurantsPage() {
                             </span>
                           ))}
                         </div>
-                        <button
-                          onClick={() => updateOrderStatus(activeTableOrder.id, "sent")}
-                          type="button"
-                        >
-                          <CheckCircle2 aria-hidden="true" />
-                          Confirm & send
-                        </button>
+                        <div className="guest-order-actions">
+                          <button
+                            className="danger-button"
+                            onClick={() => {
+                              if (confirmingGuestRejectOrderId !== activeTableOrder.id) {
+                                setConfirmingGuestRejectOrderId(activeTableOrder.id);
+                                return;
+                              }
+
+                              void updateOrderStatus(activeTableOrder.id, "cancelled");
+                            }}
+                            type="button"
+                          >
+                            <X aria-hidden="true" />
+                            {confirmingGuestRejectOrderId === activeTableOrder.id
+                              ? "Confirm reject"
+                              : "Reject"}
+                          </button>
+                          <button
+                            onClick={() => updateOrderStatus(activeTableOrder.id, "sent")}
+                            type="button"
+                          >
+                            <CheckCircle2 aria-hidden="true" />
+                            Confirm & send
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                     <form className="table-service-form" onSubmit={updateTableDetails}>
@@ -2952,15 +3180,28 @@ export default function RestaurantsPage() {
                 ) : null}
 
                 {data?.canManageRestaurant ? (
-                  <div className="reservation-panel">
+                  <div className="reservation-panel" id="restaurant-reservations">
                     <div className="reservation-header">
                       <div>
                         <p className="eyebrow">Reservations</p>
                         <h3>Booking and waitlist</h3>
                       </div>
-                      <strong>{upcomingReservations.length}</strong>
+                      <div className="reservation-metrics">
+                        <span>
+                          <strong>{upcomingReservations.length}</strong>
+                          total
+                        </span>
+                        <span>
+                          <strong>{guestRequestCount}</strong>
+                          guest
+                        </span>
+                        <span>
+                          <strong>{waitlistedReservationCount}</strong>
+                          waitlist
+                        </span>
+                      </div>
                       <button
-                        onClick={() => setIsReservationModalOpen(true)}
+                        onClick={openNewReservationModal}
                         type="button"
                       >
                         <Plus aria-hidden="true" />
@@ -2968,8 +3209,36 @@ export default function RestaurantsPage() {
                       </button>
                     </div>
 
+                    <div
+                      aria-label="Filter reservations"
+                      className="segmented-control reservation-filter"
+                      role="group"
+                    >
+                      <button
+                        data-selected={reservationListFilter === "all"}
+                        onClick={() => setReservationListFilter("all")}
+                        type="button"
+                      >
+                        All <span>{upcomingReservations.length}</span>
+                      </button>
+                      <button
+                        data-selected={reservationListFilter === "guest"}
+                        onClick={() => setReservationListFilter("guest")}
+                        type="button"
+                      >
+                        Guest <span>{guestRequestCount}</span>
+                      </button>
+                      <button
+                        data-selected={reservationListFilter === "waitlist"}
+                        onClick={() => setReservationListFilter("waitlist")}
+                        type="button"
+                      >
+                        Waitlist <span>{waitlistedReservationCount}</span>
+                      </button>
+                    </div>
+
                     <div className="reservation-list">
-                      {upcomingReservations.map((reservation) => {
+                      {visibleReservations.map((reservation) => {
                         const tableName = reservation.tableId
                           ? selectedRestaurant.tables.find(
                               (table) => table.id === reservation.tableId,
@@ -2979,7 +3248,12 @@ export default function RestaurantsPage() {
                         return (
                           <article className="reservation-row" key={reservation.id}>
                             <div>
-                              <strong>{reservation.guestName}</strong>
+                              <div className="reservation-title-row">
+                                <strong>{reservation.guestName}</strong>
+                                {reservation.guestId?.startsWith("public-menu") ? (
+                                  <small>Guest request</small>
+                                ) : null}
+                              </div>
                               <span>
                                 {reservation.partySize} guest
                                 {reservation.partySize === 1 ? "" : "s"} -{" "}
@@ -3022,6 +3296,36 @@ export default function RestaurantsPage() {
                               ) : null}
                             </div>
                             <div className="reservation-actions">
+                              {reservation.status === "waitlisted" ? (
+                                <button
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    updateReservation(reservation.id, {
+                                      status: "confirmed",
+                                      tableId:
+                                        reservation.tableId ||
+                                        reservation.suggestedTables[0]?.id ||
+                                        "",
+                                    })
+                                  }
+                                  type="button"
+                                >
+                                  Confirm
+                                </button>
+                              ) : null}
+                              <button
+                                className="secondary-button"
+                                onClick={() => openEditReservationModal(reservation)}
+                                type="button"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => startReservationOrder(reservation)}
+                                type="button"
+                              >
+                                Start order
+                              </button>
                               <button
                                 disabled={reservation.status === "seated"}
                                 onClick={() =>
@@ -3036,6 +3340,28 @@ export default function RestaurantsPage() {
                                 type="button"
                               >
                                 Seat
+                              </button>
+                              <button
+                                className="danger-button"
+                                onClick={async () => {
+                                  if (confirmingReservationCancelId !== reservation.id) {
+                                    setConfirmingReservationCancelId(reservation.id);
+                                    return;
+                                  }
+
+                                  const didCancel = await updateReservation(reservation.id, {
+                                    status: "cancelled",
+                                  });
+
+                                  if (didCancel) {
+                                    setConfirmingReservationCancelId(null);
+                                  }
+                                }}
+                                type="button"
+                              >
+                                {confirmingReservationCancelId === reservation.id
+                                  ? "Confirm cancel"
+                                  : "Cancel"}
                               </button>
                               <select
                                 aria-label={`Status for ${reservation.guestName}`}
@@ -3056,9 +3382,9 @@ export default function RestaurantsPage() {
                           </article>
                         );
                       })}
-                      {!upcomingReservations.length ? (
+                      {!visibleReservations.length ? (
                         <div className="empty-state">
-                          No reservations or waitlist entries.
+                          No reservations match this filter.
                         </div>
                       ) : null}
                     </div>
@@ -3073,137 +3399,192 @@ export default function RestaurantsPage() {
                     className="reservation-modal"
                     role="dialog"
                   >
-                    <div className="reservation-header">
+                    <div className="reservation-header reservation-modal-header">
                       <div>
                         <p className="eyebrow">Booking</p>
-                        <h3>New reservation</h3>
+                        <h3>
+                          {editingReservationId ? "Edit reservation" : "New reservation"}
+                        </h3>
                       </div>
                       <button
-                        onClick={() => setIsReservationModalOpen(false)}
+                        aria-label="Close reservation"
+                        className="icon-button"
+                        onClick={closeReservationModal}
                         type="button"
                       >
-                        Close
+                        <X aria-hidden="true" />
                       </button>
                     </div>
                     <form className="reservation-form modal-form" onSubmit={createReservation}>
-                      <label>
-                        Guest
-                        <input
-                          onChange={(event) => setReservationGuestName(event.target.value)}
-                          placeholder="Guest name"
-                          required
-                          value={reservationGuestName}
-                        />
-                      </label>
-                      <label>
-                        Party
-                        <input
-                          min="1"
-                          onChange={(event) => setReservationPartySize(event.target.value)}
-                          required
-                          type="number"
-                          value={reservationPartySize}
-                        />
-                      </label>
-                      <label>
-                        Time
-                        <input
-                          onChange={(event) => setReservationScheduledAt(event.target.value)}
-                          required
-                          type="datetime-local"
-                          value={reservationScheduledAt}
-                        />
-                      </label>
-                      <label>
-                        Table
-                        <select
-                          onChange={(event) => setReservationTableId(event.target.value)}
-                          value={reservationTableId}
-                        >
-                          <option value="">Suggest later</option>
-                          {selectedRestaurant.tables.map((table) => (
-                            <option key={table.id} value={table.id}>
-                              {table.name} - {formatLabel(table.status)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Type
-                        <select
-                          onChange={(event) => setReservationStatus(event.target.value)}
-                          value={reservationStatus}
-                        >
-                          <option value="confirmed">Reservation</option>
-                          <option value="waitlisted">Waitlist</option>
-                        </select>
-                      </label>
-                      <label className="reservation-notes">
-                        Notes
-                        <input
-                          onChange={(event) => setReservationNotes(event.target.value)}
-                          placeholder="Occasion, preferences..."
-                          value={reservationNotes}
-                        />
-                      </label>
-
-                      <div className="reservation-item-picker">
-                        <div>
-                          <strong>Requested items</strong>
-                          <span>Optional pre-order for the booking.</span>
+                      <div className="reservation-modal-body">
+                        <div className="reservation-primary-fields">
+                          <label>
+                            Guest
+                            <input
+                              onChange={(event) => setReservationGuestName(event.target.value)}
+                              placeholder="Guest name"
+                              required
+                              value={reservationGuestName}
+                            />
+                          </label>
+                          <label>
+                            Party
+                            <input
+                              min="1"
+                              onChange={(event) => setReservationPartySize(event.target.value)}
+                              required
+                              type="number"
+                              value={reservationPartySize}
+                            />
+                          </label>
+                          <label>
+                            Time
+                            <input
+                              onChange={(event) => setReservationScheduledAt(event.target.value)}
+                              required
+                              type="datetime-local"
+                              value={reservationScheduledAt}
+                            />
+                          </label>
+                          <label>
+                            Table
+                            <select
+                              onChange={(event) => setReservationTableId(event.target.value)}
+                              value={reservationTableId}
+                            >
+                              <option value="">Suggest later</option>
+                              {selectedRestaurant.tables.map((table) => (
+                                <option key={table.id} value={table.id}>
+                                  {table.name} - {formatLabel(table.status)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Type
+                            <select
+                              onChange={(event) => setReservationStatus(event.target.value)}
+                              value={reservationStatus}
+                            >
+                              <option value="confirmed">Reservation</option>
+                              <option value="waitlisted">Waitlist</option>
+                            </select>
+                          </label>
                         </div>
-                        <select
-                          onChange={(event) => {
-                            if (event.target.value) {
-                              addReservationItem(event.target.value);
-                              event.target.value = "";
-                            }
-                          }}
-                        >
-                          <option value="">Add menu item</option>
-                          {selectedRestaurant.menuItems.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name} - {item.currency} {item.price.toFixed(2)}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="reservation-items">
-                          {reservationItems.map((item, index) => {
-                            const menuItem = selectedRestaurant.menuItems.find(
-                              (candidate) => candidate.id === item.menuItemId,
-                            );
 
-                            return (
-                              <div key={`${item.menuItemId}-${index}`}>
-                                <span>{menuItem?.name ?? "Menu item"}</span>
-                                <input
-                                  min="0"
-                                  onChange={(event) =>
-                                    updateReservationItemQuantity(
-                                      index,
-                                      Number(event.target.value),
-                                    )
-                                  }
-                                  type="number"
-                                  value={item.quantity}
-                                />
+                        <label className="reservation-notes">
+                          Notes
+                          <input
+                            onChange={(event) => setReservationNotes(event.target.value)}
+                            placeholder="Occasion, preferences..."
+                            value={reservationNotes}
+                          />
+                        </label>
+
+                        <div className="reservation-item-picker">
+                          <div className="reservation-item-picker-header">
+                            <div>
+                              <strong>Requested items</strong>
+                              <span>{reservationItems.length} selected</span>
+                            </div>
+                            <select
+                              aria-label="Add requested menu item"
+                              onChange={(event) => {
+                                if (event.target.value) {
+                                  addReservationItem(event.target.value);
+                                  event.target.value = "";
+                                }
+                              }}
+                            >
+                              <option value="">Add menu item</option>
+                              {selectedRestaurant.menuItems.map((item) => (
+                                <option
+                                  disabled={!item.isAvailable}
+                                  key={item.id}
+                                  value={item.id}
+                                >
+                                  {item.name} - {item.currency} {item.price.toFixed(2)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="reservation-items reservation-modal-items">
+                            {reservationItems.map((item, index) => {
+                              const menuItem = selectedRestaurant.menuItems.find(
+                                (candidate) => candidate.id === item.menuItemId,
+                              );
+
+                              return (
+                                <div
+                                  className="reservation-item-row"
+                                  key={`${item.menuItemId}-${index}`}
+                                >
+                                  <div>
+                                    <strong>{menuItem?.name ?? "Menu item"}</strong>
+                                    <span>
+                                      {menuItem?.currency ?? reservationCurrency}{" "}
+                                      {((menuItem?.price ?? 0) * item.quantity).toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <input
+                                    aria-label={`Quantity for ${menuItem?.name ?? "item"}`}
+                                    min="1"
+                                    onChange={(event) =>
+                                      updateReservationItemQuantity(
+                                        index,
+                                        Number(event.target.value) || 1,
+                                      )
+                                    }
+                                    type="number"
+                                    value={item.quantity}
+                                  />
+                                  <input
+                                    aria-label={`Notes for ${menuItem?.name ?? "item"}`}
+                                    onChange={(event) =>
+                                      updateReservationItemNotes(index, event.target.value)
+                                    }
+                                    placeholder="Item notes"
+                                    value={item.notes}
+                                  />
+                                  <button
+                                    aria-label={`Remove ${menuItem?.name ?? "item"}`}
+                                    className="danger-button"
+                                    onClick={() => removeReservationItem(index)}
+                                    type="button"
+                                  >
+                                    <Trash2 aria-hidden="true" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            {!reservationItems.length ? (
+                              <div className="empty-state">
+                                Add menu items only when the guest wants them reserved.
                               </div>
-                            );
-                          })}
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 
-                      <button disabled={isSubmitting} type="submit">
-                        <Plus aria-hidden="true" />
-                        Save booking
-                      </button>
+                      <div className="reservation-modal-footer">
+                        <div>
+                          <span>Pre-order total</span>
+                          <strong>
+                            {reservationCurrency} {reservationItemTotal.toFixed(2)}
+                          </strong>
+                        </div>
+                        <button disabled={isSubmitting} type="submit">
+                          <Plus aria-hidden="true" />
+                          {editingReservationId ? "Update booking" : "Save booking"}
+                        </button>
+                      </div>
                     </form>
                   </section>
                 </div>
               ) : null}
 
               {data?.canManageRestaurant ? (
-                <section className="notice-panel compact-panel">
+                <section className="notice-panel compact-panel" id="restaurant-menu">
                   <p className="eyebrow">Menu</p>
                   <h2>Menu setup</h2>
                   <form className="restaurant-menu-form" onSubmit={createMenuCategory}>
@@ -3448,10 +3829,14 @@ export default function RestaurantsPage() {
                 </section>
               ) : null}
 
-              <section className="notice-panel compact-panel">
+              <section className="notice-panel compact-panel" id="restaurant-pos">
                 <p className="eyebrow">Orders</p>
                 {data?.canCreateOrder ? (
-                  <form className="restaurant-order-builder pos-order-builder" onSubmit={createOrder}>
+                  <form
+                    className="restaurant-order-builder pos-order-builder"
+                    onSubmit={createOrder}
+                    ref={orderBuilderRef}
+                  >
                     <section className="pos-menu-panel">
                       <div className="pos-builder-toolbar">
                         <label>
@@ -3573,6 +3958,12 @@ export default function RestaurantsPage() {
                         </div>
                         <strong>{orderItems.length}</strong>
                       </div>
+                      {reservationOrderSource ? (
+                        <div className="reservation-order-banner">
+                          <span>Reservation</span>
+                          <strong>{reservationOrderSource}</strong>
+                        </div>
+                      ) : null}
 
                       <div className="order-draft-list pos-ticket-list">
                         {orderItems.map((item, index) => {
@@ -3693,7 +4084,7 @@ export default function RestaurantsPage() {
                   </form>
                 ) : null}
 
-                <div className="restaurant-order-list">
+                <div className="restaurant-order-list" id="restaurant-orders">
                   <div className="order-panel-toolbar">
                     <div>
                       <p className="eyebrow">Orders</p>
@@ -4309,14 +4700,34 @@ export default function RestaurantsPage() {
                             </div>
                             <div className="order-compact-actions">
                               {isGuestQrOrder(order) ? (
-                                <button
-                                  aria-label={`Confirm guest QR order for ${tableName}`}
-                                  onClick={() => updateOrderStatus(order.id, "sent")}
-                                  type="button"
-                                >
-                                  <CheckCircle2 aria-hidden="true" />
-                                  Confirm & send
-                                </button>
+                                <>
+                                  <button
+                                    aria-label={`Reject guest QR order for ${tableName}`}
+                                    className="danger-button"
+                                    onClick={() => {
+                                      if (confirmingGuestRejectOrderId !== order.id) {
+                                        setConfirmingGuestRejectOrderId(order.id);
+                                        return;
+                                      }
+
+                                      void updateOrderStatus(order.id, "cancelled");
+                                    }}
+                                    type="button"
+                                  >
+                                    <X aria-hidden="true" />
+                                    {confirmingGuestRejectOrderId === order.id
+                                      ? "Confirm reject"
+                                      : "Reject"}
+                                  </button>
+                                  <button
+                                    aria-label={`Confirm guest QR order for ${tableName}`}
+                                    onClick={() => updateOrderStatus(order.id, "sent")}
+                                    type="button"
+                                  >
+                                    <CheckCircle2 aria-hidden="true" />
+                                    Confirm & send
+                                  </button>
+                                </>
                               ) : null}
                               <button
                                 aria-label={`Pay order for ${tableName}`}
