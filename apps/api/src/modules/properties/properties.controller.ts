@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import { Transform, Type } from "class-transformer";
@@ -28,6 +29,7 @@ import { RequirePermission } from "../auth/require-permission.decorator";
 import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import { PrismaService } from "../database/prisma.service";
 import type { TenantContext } from "../tenancy/tenant-context.service";
+import { HotelRateLookupService } from "./hotel-rate-lookup.service";
 
 const roomStatuses = [
   "available",
@@ -141,6 +143,27 @@ class CheckOutDto {
   acknowledgeRestaurantCharges?: boolean;
 }
 
+class RateLookupQueryDto {
+  @IsDateString()
+  arrivalDate!: string;
+
+  @IsDateString()
+  departureDate!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  guestCount?: number;
+
+  @IsOptional()
+  @IsString()
+  ratePlanId?: string;
+
+  @IsString()
+  roomTypeId!: string;
+}
+
 function allowedRoomStatusesForRole(role: TenantRole): RoomStatus[] {
   if (role === "owner" || role === "admin") {
     return [...roomStatuses];
@@ -164,11 +187,16 @@ function allowedRoomStatusesForRole(role: TenantRole): RoomStatus[] {
 @Controller("properties")
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class PropertiesController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rateLookup: HotelRateLookupService,
+  ) {}
 
   @Get()
   @RequirePermission("property.read")
-  async list(@CurrentTenant() context: TenantContext) {
+  async list(
+    @CurrentTenant() context: TenantContext,
+  ): Promise<Record<string, unknown>> {
     const properties = await this.prisma.property.findMany({
       where: { tenantId: context.tenant.id },
       include: {
@@ -177,6 +205,7 @@ export class PropertiesController {
         },
         rooms: {
           include: {
+            roomType: true,
             stays: {
               where: { status: "active" },
               include: { guest: true },
@@ -229,6 +258,19 @@ export class PropertiesController {
             : null,
           id: room.id,
           number: room.number,
+          roomType: room.roomType
+            ? {
+                baseOccupancy: room.roomType.baseOccupancy,
+                code: room.roomType.code,
+                defaultCurrency: room.roomType.defaultCurrency,
+                defaultRate: room.roomType.defaultRate,
+                id: room.roomType.id,
+                isActive: room.roomType.isActive,
+                maxOccupancy: room.roomType.maxOccupancy,
+                name: room.roomType.name,
+              }
+            : null,
+          roomTypeId: room.roomTypeId,
           status: room.status,
           type: room.type,
         })),
@@ -276,14 +318,22 @@ export class PropertiesController {
     @Param("propertyId") propertyId: string,
     @Body() body: CreateRoomsDto,
   ) {
-    const property = await this.findTenantProperty(context.tenant.id, propertyId);
-    const from = this.requiredPositiveInteger(body.from, "Starting room number");
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const from = this.requiredPositiveInteger(
+      body.from,
+      "Starting room number",
+    );
     const to = this.requiredPositiveInteger(body.to, "Ending room number");
     const roomType = body.type?.trim() || "standard";
     const prefix = body.prefix?.trim() ?? "";
 
     if (to < from) {
-      throw new BadRequestException("Ending room number must be after the start.");
+      throw new BadRequestException(
+        "Ending room number must be after the start.",
+      );
     }
 
     if (to - from > 199) {
@@ -291,11 +341,32 @@ export class PropertiesController {
     }
 
     const floor = body.floor?.trim();
+    const roomTypeRecord = await this.prisma.roomType.upsert({
+      where: {
+        propertyId_code: {
+          code: this.toRoomTypeCode(roomType),
+          propertyId: property.id,
+        },
+      },
+      create: {
+        code: this.toRoomTypeCode(roomType),
+        defaultCurrency: property.currency,
+        name: roomType,
+        propertyId: property.id,
+        tenantId: context.tenant.id,
+      },
+      update: {
+        defaultCurrency: property.currency,
+        isActive: true,
+        name: roomType,
+      },
+    });
     const rooms = Array.from({ length: to - from + 1 }, (_value, index) => {
       const number = `${prefix}${from + index}`;
       return {
         number,
         propertyId: property.id,
+        roomTypeId: roomTypeRecord.id,
         tenantId: context.tenant.id,
         type: floor ? `${roomType} - floor ${floor}` : roomType,
       };
@@ -322,6 +393,37 @@ export class PropertiesController {
     };
   }
 
+  @Get(":propertyId/rates/lookup")
+  @RequirePermission("property.read")
+  async lookupRate(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Query() query: RateLookupQueryDto,
+  ): Promise<Record<string, unknown>> {
+    const result = await this.rateLookup.lookup({
+      arrivalDate: new Date(query.arrivalDate),
+      departureDate: new Date(query.departureDate),
+      guestCount: query.guestCount,
+      propertyId,
+      ratePlanId: query.ratePlanId?.trim() || undefined,
+      roomTypeId: query.roomTypeId,
+      tenantId: context.tenant.id,
+    });
+
+    return {
+      arrivalDate: result.arrivalDate,
+      baseAmount: result.baseAmount,
+      currency: result.currency,
+      departureDate: result.departureDate,
+      extraGuestAmount: result.extraGuestAmount,
+      guestCount: result.guestCount,
+      minNights: result.minNights,
+      nightlyRates: result.nightlyRates,
+      nights: result.nights,
+      totalAmount: result.totalAmount,
+    };
+  }
+
   @Post(":propertyId/rooms/:roomId/check-in")
   @RequirePermission("reservations.manage")
   async checkIn(
@@ -340,7 +442,11 @@ export class PropertiesController {
     }
 
     await this.findTenantProperty(context.tenant.id, propertyId);
-    const room = await this.findTenantRoom(context.tenant.id, propertyId, roomId);
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      roomId,
+    );
 
     if (room.status === "maintenance" || room.status === "out_of_order") {
       throw new BadRequestException("This room is not available for check-in.");
@@ -413,7 +519,11 @@ export class PropertiesController {
     @Body() body: CheckOutDto,
   ) {
     await this.findTenantProperty(context.tenant.id, propertyId);
-    const room = await this.findTenantRoom(context.tenant.id, propertyId, roomId);
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      roomId,
+    );
     const activeStay = await this.prisma.stay.findFirst({
       where: {
         roomId,
@@ -509,7 +619,11 @@ export class PropertiesController {
 
     await this.findTenantProperty(context.tenant.id, propertyId);
 
-    const room = await this.findTenantRoom(context.tenant.id, propertyId, roomId);
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      roomId,
+    );
 
     return this.prisma.room.update({
       where: { id: room.id },
@@ -555,6 +669,17 @@ export class PropertiesController {
     }
 
     return this.requiredPositiveInteger(value, "Room count");
+  }
+
+  private toRoomTypeCode(value: string) {
+    const code = value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+
+    return code || "standard";
   }
 
   private requiredPositiveInteger(

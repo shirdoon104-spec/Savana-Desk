@@ -13,6 +13,7 @@ import {
   PaymentsController,
   PaystackWebhookController,
 } from "./payments/payments.controller";
+import { HotelRateLookupService } from "./properties/hotel-rate-lookup.service";
 import { PropertiesController } from "./properties/properties.controller";
 import { PublicMenuController } from "./restaurants/public-menu.controller";
 import { RestaurantOrderTotalsService } from "./restaurants/order-totals.service";
@@ -59,6 +60,7 @@ import { ClerkWebhookService } from "./webhooks/clerk-webhook.service";
     ClerkOrganizationResolver,
     ClerkWebhookService,
     IdempotencyService,
+    HotelRateLookupService,
     RestaurantOrderTotalsService,
     {
       provide: APP_INTERCEPTOR,
