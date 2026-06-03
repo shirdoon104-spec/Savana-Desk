@@ -48,6 +48,19 @@ Do not set the Railway root directory to `apps/api` or `apps/web`; the Dockerfil
 
 ## Production Environment
 
+Production Clerk requires a real application domain. Railway-provided domains such as
+`*.up.railway.app` are fine for staging, but Clerk does not allow them for creating a
+production instance. Until a custom domain is connected, keep staging on Clerk test keys.
+
+Recommended custom domains:
+
+- Web: `app.yourdomain.com`
+- API: `api.yourdomain.com`
+
+After those domains are connected, create the Clerk production instance, copy the
+`pk_live_*` and `sk_live_*` keys, and create the production Clerk webhook endpoint.
+Paystack can remain on test keys until payment go-live.
+
 ### API
 
 ```env
