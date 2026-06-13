@@ -211,17 +211,26 @@ Invoice = official financial document
 
 Goal: introduce a real folio model while preserving current `Stay` behavior.
 
-- [ ] Add `GuestFolio`.
-- [ ] Add `FolioLineItem`.
-- [ ] Add `FolioPayment`.
-- [ ] Add `FolioAdjustment`.
-- [ ] Link `GuestFolio` to `Stay`, `Guest`, `Property`, and `Tenant`.
-- [ ] Backfill one folio for each active or historical stay.
-- [ ] Migrate `FolioCharge` into `FolioLineItem` or keep it temporarily as a compatibility table.
-- [ ] Use `GuestFolio.id` as the new `folioId`.
-- [ ] Keep support for old `Stay.id` folio references during migration.
-- [ ] Add folio status: open, pending_checkout, closed, locked, void.
+- [x] Add `GuestFolio`.
+- [x] Add `FolioLineItem`.
+- [x] Add `FolioPayment`.
+- [x] Add `FolioAdjustment`.
+- [x] Link `GuestFolio` to `Stay`, `Guest`, `Property`, and `Tenant`.
+- [x] Backfill one folio for each active or historical stay.
+- [x] Migrate `FolioCharge` into `FolioLineItem` or keep it temporarily as a compatibility table.
+- [x] Use `GuestFolio.id` as the new `folioId`.
+- [x] Keep support for old `Stay.id` folio references during migration.
+- [x] Add folio status: open, pending_checkout, closed, locked, void.
 - [ ] Add folio detail API and UI.
+
+Status as of 2026-06-13: explicit folio foundation is implemented. `GuestFolio`,
+`FolioLineItem`, `FolioPayment`, and `FolioAdjustment` now exist with typed folio
+statuses and append-only line item types. The migration backfills one folio for
+each existing stay, links legacy `FolioCharge` rows to the matching folio, and
+copies legacy room charges into `FolioLineItem`. New check-ins create an open
+folio and checkout closes it. `GET /stays/active` now returns `GuestFolio.id`
+as `folioId` when present, while `POST /folios/:folioId/charges` still accepts
+old `Stay.id` folio references during the migration window.
 
 Line item types:
 

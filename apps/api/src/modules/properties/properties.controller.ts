@@ -1130,7 +1130,10 @@ export class PropertiesController {
     @Param("reservationId") reservationId: string,
     @Body() body: UpdateHotelReservationStatusDto,
   ): Promise<Record<string, unknown>> {
-    await this.findTenantProperty(context.tenant.id, propertyId);
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
     const reservation = await this.prisma.hotelReservation.findFirst({
       where: {
         id: reservationId,
@@ -1163,7 +1166,10 @@ export class PropertiesController {
     @Param("roomId") roomId: string,
     @Body() body: CheckInDto,
   ): Promise<unknown> {
-    await this.findTenantProperty(context.tenant.id, propertyId);
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
     const room = await this.findTenantRoom(
       context.tenant.id,
       propertyId,
@@ -1323,6 +1329,17 @@ export class PropertiesController {
         },
       });
 
+      const guestFolio = await tx.guestFolio.create({
+        data: {
+          createdByUserId: context.tenantUser.clerkUserId,
+          currency: property.currency,
+          guestId: guest.id,
+          propertyId,
+          stayId: createdStay.id,
+          tenantId: context.tenant.id,
+        },
+      });
+
       await tx.room.update({
         where: { id: room.id },
         data: { status: "occupied" },
@@ -1356,6 +1373,7 @@ export class PropertiesController {
           event: "check_in_completed",
           newState: {
             expectedCheckOutAt,
+            folioId: guestFolio.id,
             guestId: guest.id,
             hotelReservationId: reservation?.id ?? null,
             roomId,
@@ -1484,6 +1502,19 @@ export class PropertiesController {
         data: { status: "cleaning" },
       });
 
+      await tx.guestFolio.updateMany({
+        where: {
+          stayId: completedStay.id,
+          status: { in: ["open", "pending_checkout"] },
+          tenantId: context.tenant.id,
+        },
+        data: {
+          closedAt: completedStay.checkOutAt,
+          closedByUserId: context.tenantUser.clerkUserId,
+          status: "closed",
+        },
+      });
+
       await tx.hotelAuditLog.create({
         data: {
           actorId: context.tenantUser.clerkUserId,
@@ -1491,6 +1522,7 @@ export class PropertiesController {
           event: "check_out_completed",
           newState: {
             checkOutAt: completedStay.checkOutAt,
+            folioStatus: "closed",
             roomStatus: "cleaning",
             stayStatus: completedStay.status,
           },

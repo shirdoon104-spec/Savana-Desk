@@ -21,6 +21,7 @@ model Tenant {
   properties            Property[]
   users                 TenantUser[]
   stays                 Stay[]
+  guestFolios           GuestFolio[]
   hotelAuditLogs        HotelAuditLog[]
   staffInvitations      StaffInvitation[]
 }
@@ -75,6 +76,7 @@ model Property {
   roomTypes         RoomType[]
   ratePlans         RatePlan[]
   stays             Stay[]
+  guestFolios       GuestFolio[]
   hotelAuditLogs    HotelAuditLog[]
   hotelReservations HotelReservation[]
   restaurants       Restaurant[]
@@ -262,6 +264,7 @@ model Guest {
   email                  String?
   phone                  String?
   stays                  Stay[]
+  guestFolios            GuestFolio[]
   hotelReservationGuests HotelReservationGuest[]
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
@@ -393,8 +396,9 @@ model Stay {
   room               Room              @relation(fields: [roomId], references: [id])
   guest              Guest             @relation(fields: [guestId], references: [id])
   hotelReservation   HotelReservation? @relation(fields: [hotelReservationId], references: [id])
+  guestFolio         GuestFolio?
   folioCharges       FolioCharge[]
-  hotelAuditLogs      HotelAuditLog[]
+  hotelAuditLogs     HotelAuditLog[]
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -439,11 +443,148 @@ enum HotelAuditEvent {
   check_out_completed
 }
 
+enum FolioStatus {
+  open
+  pending_checkout
+  closed
+  locked
+  void
+}
+
+enum FolioLineItemType {
+  room_night
+  restaurant_charge
+  manual_charge
+  tax
+  service_charge
+  discount
+  deposit
+  refund
+  adjustment
+}
+
+enum FolioPaymentStatus {
+  pending
+  confirmed
+  failed
+  refunded
+  voided
+}
+
+enum FolioAdjustmentStatus {
+  pending
+  approved
+  rejected
+  posted
+  voided
+}
+
+model GuestFolio {
+  id              String            @id @default(cuid())
+  tenantId        String
+  propertyId      String
+  stayId          String            @unique
+  guestId         String
+  status          FolioStatus       @default(open)
+  currency        String
+  balance         Decimal           @default(0)
+  openedAt        DateTime          @default(now())
+  closedAt        DateTime?
+  lockedAt        DateTime?
+  createdByUserId String?
+  closedByUserId  String?
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  property        Property          @relation(fields: [propertyId], references: [id])
+  stay            Stay              @relation(fields: [stayId], references: [id])
+  guest           Guest             @relation(fields: [guestId], references: [id])
+  lineItems       FolioLineItem[]
+  payments        FolioPayment[]
+  adjustments     FolioAdjustment[]
+  legacyCharges   FolioCharge[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([tenantId, propertyId, status])
+  @@index([tenantId, guestId, openedAt])
+}
+
+model FolioLineItem {
+  id          String            @id @default(cuid())
+  tenantId    String
+  propertyId  String
+  folioId     String
+  type        FolioLineItemType
+  description String
+  quantity    Decimal           @default(1)
+  unitAmount  Decimal?
+  amount      Decimal
+  currency    String
+  sourceType  String?
+  sourceId    String?
+  postedById  String?
+  voidedAt    DateTime?
+  voidedById  String?
+  voidReason  String?
+  folio       GuestFolio        @relation(fields: [folioId], references: [id])
+  adjustments FolioAdjustment[]
+  createdAt   DateTime          @default(now())
+
+  @@index([tenantId, propertyId, folioId, createdAt])
+  @@index([tenantId, sourceType, sourceId])
+}
+
+model FolioPayment {
+  id                    String             @id @default(cuid())
+  tenantId              String
+  propertyId            String
+  folioId               String
+  method                String
+  provider              String?
+  providerTransactionId String?
+  reference             String?
+  status                FolioPaymentStatus @default(pending)
+  amount                Decimal
+  currency              String
+  paidAt                DateTime?
+  recordedById          String?
+  refundedAt            DateTime?
+  refundedById          String?
+  refundReason          String?
+  metadata              Json?
+  folio                 GuestFolio         @relation(fields: [folioId], references: [id])
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@unique([tenantId, method, reference])
+  @@index([tenantId, propertyId, folioId, status])
+}
+
+model FolioAdjustment {
+  id             String                @id @default(cuid())
+  tenantId       String
+  propertyId     String
+  folioId        String
+  lineItemId     String?
+  amount         Decimal
+  currency       String
+  reason         String
+  status         FolioAdjustmentStatus @default(posted)
+  authorizedById String?
+  createdById    String
+  folio          GuestFolio            @relation(fields: [folioId], references: [id])
+  lineItem       FolioLineItem?        @relation(fields: [lineItemId], references: [id])
+  createdAt      DateTime              @default(now())
+
+  @@index([tenantId, propertyId, folioId, createdAt])
+  @@index([tenantId, lineItemId])
+}
+
 model FolioCharge {
   id           String   @id @default(cuid())
   tenantId     String
   propertyId   String
   stayId       String
+  folioId      String?
   orderId      String?
   restaurantId String?
   amount       Decimal
@@ -452,9 +593,11 @@ model FolioCharge {
   postedById   String
   createdAt    DateTime @default(now())
 
-  stay Stay @relation(fields: [stayId], references: [id])
+  stay  Stay        @relation(fields: [stayId], references: [id])
+  folio GuestFolio? @relation(fields: [folioId], references: [id])
 
   @@index([tenantId, stayId, createdAt])
+  @@index([tenantId, folioId])
   @@index([tenantId, orderId])
 }
 

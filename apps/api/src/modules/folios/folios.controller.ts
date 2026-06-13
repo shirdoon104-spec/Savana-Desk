@@ -147,7 +147,10 @@ export class FoliosController {
 
   @Get("reports/restaurant-z-report.csv")
   @Header("Content-Type", "text/csv; charset=utf-8")
-  @Header("Content-Disposition", 'attachment; filename="restaurant-z-report.csv"')
+  @Header(
+    "Content-Disposition",
+    'attachment; filename="restaurant-z-report.csv"',
+  )
   @RequirePermission("billing.read")
   async restaurantZReportCsv(
     @CurrentTenant() context: TenantContext,
@@ -209,13 +212,19 @@ export class FoliosController {
 
   @Get("reports/restaurant-shift-report.csv")
   @Header("Content-Type", "text/csv; charset=utf-8")
-  @Header("Content-Disposition", 'attachment; filename="restaurant-shift-report.csv"')
+  @Header(
+    "Content-Disposition",
+    'attachment; filename="restaurant-shift-report.csv"',
+  )
   @RequirePermission("billing.read")
   async restaurantShiftReportCsv(
     @CurrentTenant() context: TenantContext,
     @Query() query: RestaurantReportQueryDto,
   ) {
-    const report = await this.buildRestaurantShiftReport(context.tenant.id, query);
+    const report = await this.buildRestaurantShiftReport(
+      context.tenant.id,
+      query,
+    );
     const rows = [
       ["section", "Shift report"],
       ["from", report.from],
@@ -275,8 +284,16 @@ export class FoliosController {
               OR: [
                 { id: { contains: search, mode: "insensitive" } },
                 { room: { number: { contains: search, mode: "insensitive" } } },
-                { guest: { firstName: { contains: search, mode: "insensitive" } } },
-                { guest: { lastName: { contains: search, mode: "insensitive" } } },
+                {
+                  guest: {
+                    firstName: { contains: search, mode: "insensitive" },
+                  },
+                },
+                {
+                  guest: {
+                    lastName: { contains: search, mode: "insensitive" },
+                  },
+                },
                 { guest: { phone: { contains: search, mode: "insensitive" } } },
               ],
             }
@@ -284,6 +301,7 @@ export class FoliosController {
       },
       include: {
         folioCharges: true,
+        guestFolio: true,
         guest: true,
         property: true,
         room: true,
@@ -294,10 +312,13 @@ export class FoliosController {
 
     return stays.map((stay) => ({
       checkoutDate: stay.expectedCheckOutAt,
-      folioId: stay.id,
+      folioId: stay.guestFolio?.id ?? stay.id,
       guestName: `${stay.guest.firstName} ${stay.guest.lastName}`.trim(),
       outstandingBalance: stay.folioCharges
-        .reduce((total, charge) => total.plus(charge.amount), new Prisma.Decimal(0))
+        .reduce(
+          (total, charge) => total.plus(charge.amount),
+          new Prisma.Decimal(0),
+        )
         .toString(),
       roomNumber: stay.room.number,
       stayId: stay.id,
@@ -315,14 +336,33 @@ export class FoliosController {
       throw new BadRequestException("Your role cannot post room charges.");
     }
 
-    const stay = await this.prisma.stay.findFirst({
+    const guestFolio = await this.prisma.guestFolio.findFirst({
       where: {
         id: folioId,
-        status: "active",
+        status: { in: ["open", "pending_checkout"] },
         tenantId: context.tenant.id,
       },
-      include: { room: true },
+      include: {
+        stay: {
+          include: { room: true },
+        },
+      },
     });
+    const legacyStay = guestFolio
+      ? null
+      : await this.prisma.stay.findFirst({
+          where: {
+            id: folioId,
+            status: "active",
+            tenantId: context.tenant.id,
+          },
+          include: {
+            guestFolio: true,
+            room: true,
+          },
+        });
+    const stay = guestFolio?.stay ?? legacyStay;
+    const activeFolio = guestFolio ?? legacyStay?.guestFolio ?? null;
 
     if (!stay || stay.checkOutAt) {
       throw new BadRequestException("Stay is not active.");
@@ -338,7 +378,9 @@ export class FoliosController {
     });
 
     if (!order) {
-      throw new BadRequestException("Order was not found for this folio charge.");
+      throw new BadRequestException(
+        "Order was not found for this folio charge.",
+      );
     }
 
     if (["closed", "cancelled"].includes(order.status)) {
@@ -349,11 +391,15 @@ export class FoliosController {
       context.tenant.id,
       order.id,
     );
-    const remaining = new Prisma.Decimal(order.totalAmount).minus(confirmedTotal);
+    const remaining = new Prisma.Decimal(order.totalAmount).minus(
+      confirmedTotal,
+    );
     const amount = new Prisma.Decimal(body.amount);
 
     if (!amount.equals(remaining)) {
-      throw new BadRequestException("Room charge amount must match the remaining order balance.");
+      throw new BadRequestException(
+        "Room charge amount must match the remaining order balance.",
+      );
     }
 
     const existingRoomCharge = await this.prisma.orderPayment.findFirst({
@@ -366,7 +412,9 @@ export class FoliosController {
     });
 
     if (existingRoomCharge) {
-      throw new BadRequestException("This order has already been charged to a room.");
+      throw new BadRequestException(
+        "This order has already been charged to a room.",
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -377,6 +425,7 @@ export class FoliosController {
           description:
             body.description?.trim() ||
             `Restaurant charge for order ${order.id}`,
+          folioId: activeFolio?.id ?? null,
           orderId: order.id,
           postedById: context.tenantUser.id,
           propertyId: order.propertyId,
@@ -385,6 +434,31 @@ export class FoliosController {
           tenantId: context.tenant.id,
         },
       });
+
+      const lineItem = activeFolio
+        ? await tx.folioLineItem.create({
+            data: {
+              amount,
+              currency: order.currency,
+              description: charge.description,
+              folioId: activeFolio.id,
+              postedById: context.tenantUser.id,
+              propertyId: order.propertyId,
+              sourceId: order.id,
+              sourceType: "restaurant_order",
+              tenantId: context.tenant.id,
+              type: "restaurant_charge",
+              unitAmount: amount,
+            },
+          })
+        : null;
+
+      if (activeFolio) {
+        await tx.guestFolio.update({
+          where: { id: activeFolio.id },
+          data: { balance: { increment: amount } },
+        });
+      }
 
       await tx.orderPayment.create({
         data: {
@@ -427,8 +501,10 @@ export class FoliosController {
             event: "charge_to_room_posted",
             newState: toPrismaJson({
               amount: amount.toString(),
+              folioLineItemId: lineItem?.id ?? null,
               folioChargeId: charge.id,
-              folioId: stay.id,
+              folioId: activeFolio?.id ?? stay.id,
+              legacyStayFolioId: stay.id,
               roomNumber: stay.room.number,
             }),
             orderId: order.id,
@@ -472,7 +548,7 @@ export class FoliosController {
 
       return {
         chargeId: charge.id,
-        folioId: stay.id,
+        folioId: activeFolio?.id ?? stay.id,
         orderId: order.id,
         status: "posted",
       };
@@ -507,9 +583,7 @@ export class FoliosController {
           lt: to,
         },
         propertyId: query.propertyId,
-        restaurantId: query.restaurantId
-          ? query.restaurantId
-          : { not: null },
+        restaurantId: query.restaurantId ? query.restaurantId : { not: null },
         tenantId,
       },
       include: {
@@ -617,7 +691,9 @@ export class FoliosController {
     const itemSubtotal = sumDecimals(orders.map((order) => order.subtotal));
     const netSales = sumDecimals(orders.map((order) => order.totalAmount));
     const paymentsCollected = sumDecimals(
-      orders.flatMap((order) => order.payments.map((payment) => payment.amount)),
+      orders.flatMap((order) =>
+        order.payments.map((payment) => payment.amount),
+      ),
     );
     const paymentVariance = paymentsCollected.minus(netSales);
     const taxCollected = sumDecimals(orders.map((order) => order.taxAmount));
@@ -625,7 +701,9 @@ export class FoliosController {
       orders.map((order) => order.serviceChargeAmount),
     );
     const discounts = sumDecimals(
-      orders.flatMap((order) => order.discounts.map((discount) => discount.amount)),
+      orders.flatMap((order) =>
+        order.discounts.map((discount) => discount.amount),
+      ),
     );
     const covers = orders.reduce((total, order) => total + order.covers, 0);
     const tablesUsed = new Set(
@@ -715,7 +793,9 @@ export class FoliosController {
       include: {
         auditLogs: {
           where: {
-            event: { in: ["order_created", "payment_confirmed", "order_closed"] },
+            event: {
+              in: ["order_created", "payment_confirmed", "order_closed"],
+            },
           },
           orderBy: { createdAt: "asc" },
         },
@@ -860,16 +940,21 @@ export class FoliosController {
           select: { amount: true, currency: true },
         }),
       ]);
-    const openOrderValue = sumDecimals(openOrders.map((order) => order.totalAmount));
+    const openOrderValue = sumDecimals(
+      openOrders.map((order) => order.totalAmount),
+    );
     const openPaidValue = sumDecimals(
-      openOrders.flatMap((order) => order.payments.map((payment) => payment.amount)),
+      openOrders.flatMap((order) =>
+        order.payments.map((payment) => payment.amount),
+      ),
     );
     const coversInHouse = activeTables.reduce(
       (total, table) => total + table.coverCount,
       0,
     );
     const stationQueueDepth = mapStationQueueDepth(kitchenItems);
-    const averagePrepMinutesByCourse = mapAveragePrepMinutesByCourse(kitchenItems);
+    const averagePrepMinutesByCourse =
+      mapAveragePrepMinutesByCourse(kitchenItems);
     const outstandingRoomCharges = mapDecimalTotals(
       roomChargePayments.map((payment) => ({
         amount: payment.amount,
@@ -907,11 +992,23 @@ export class FoliosController {
 }
 
 function canSearchActiveStays(role: TenantRole) {
-  return ["owner", "admin", "restaurant_manager", "waiter", "front_desk"].includes(role);
+  return [
+    "owner",
+    "admin",
+    "restaurant_manager",
+    "waiter",
+    "front_desk",
+  ].includes(role);
 }
 
 function canPostRoomCharge(role: TenantRole) {
-  return ["owner", "admin", "restaurant_manager", "waiter", "front_desk"].includes(role);
+  return [
+    "owner",
+    "admin",
+    "restaurant_manager",
+    "waiter",
+    "front_desk",
+  ].includes(role);
 }
 
 function toPrismaJson(value: unknown): Prisma.InputJsonValue {
@@ -1003,7 +1100,13 @@ function mapStationQueueDepth(
 ) {
   const totals = new Map<
     string,
-    { preparing: number; ready: number; sent: number; station: string; total: number }
+    {
+      preparing: number;
+      ready: number;
+      sent: number;
+      station: string;
+      total: number;
+    }
   >();
 
   for (const item of items) {
@@ -1044,7 +1147,10 @@ function mapAveragePrepMinutesByCourse(
     sentAt: Date | null;
   }>,
 ) {
-  const totals = new Map<number, { course: number; count: number; totalMinutes: number }>();
+  const totals = new Map<
+    number,
+    { course: number; count: number; totalMinutes: number }
+  >();
 
   for (const item of items) {
     if (!item.sentAt || !item.preparedAt) {
@@ -1068,7 +1174,9 @@ function mapAveragePrepMinutesByCourse(
 
   return Array.from(totals.values())
     .map((row) => ({
-      averageMinutes: row.count ? (row.totalMinutes / row.count).toFixed(1) : "0.0",
+      averageMinutes: row.count
+        ? (row.totalMinutes / row.count).toFixed(1)
+        : "0.0",
       course: row.course,
       sampleSize: row.count,
     }))
@@ -1083,7 +1191,11 @@ function resolveReportRange(query: RoomChargeReportQueryDto) {
     ? new Date(query.to)
     : new Date(from.getTime() + 24 * 60 * 60 * 1000);
 
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) {
+  if (
+    Number.isNaN(from.getTime()) ||
+    Number.isNaN(to.getTime()) ||
+    from >= to
+  ) {
     throw new BadRequestException("Choose a valid report date range.");
   }
 
