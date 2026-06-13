@@ -25,4 +25,4 @@ COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/packages ./packages
 
 EXPOSE 4000
-CMD ["sh", "-c", "pnpm db:migrate:deploy && node apps/api/dist/main.js"]
+CMD ["sh", "-c", "pnpm --filter @rayaan/database db:migrate:deploy:recover-baseline && node apps/api/dist/main.js"]

@@ -9,6 +9,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:deploy:recover-baseline": "node scripts/deploy-with-baseline-recovery.cjs",
     "db:push": "prisma db push",
     "build": "tsc",
     "lint": "tsc --noEmit",
