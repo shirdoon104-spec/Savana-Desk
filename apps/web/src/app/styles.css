@@ -1987,6 +1987,33 @@ select:focus {
   min-height: 38px;
 }
 
+.checkout-review {
+  background: #fff8e6;
+  border: 1px solid #f2c96d;
+  border-radius: var(--radius);
+  color: #5c3b00;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.checkout-review strong {
+  color: #402900;
+  font-size: 14px;
+}
+
+.checkout-review p {
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.checkout-review-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .inventory-form {
   align-items: end;
   display: grid;

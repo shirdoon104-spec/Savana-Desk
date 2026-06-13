@@ -327,6 +327,10 @@ export default function PropertiesPage() {
   const [guestPhone, setGuestPhone] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [expectedCheckOutAt, setExpectedCheckOutAt] = useState("");
+  const [checkoutReview, setCheckoutReview] = useState<{
+    message: string;
+    roomId: string;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const earliestExpectedCheckOutDate = useMemo(
     () => dateInputDaysFromNow(1),
@@ -1062,7 +1066,10 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
-  async function checkOutGuest(roomId: string) {
+  async function checkOutGuest(
+    roomId: string,
+    acknowledgeRestaurantCharges = false,
+  ) {
     setIsSubmitting(true);
     setError(null);
 
@@ -1082,27 +1089,24 @@ export default function PropertiesPage() {
       `hotel-check-out-confirmed:${propertyId}:${roomId}`,
     );
 
-    const postCheckout = (acknowledgeRestaurantCharges: boolean) =>
-      fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/check-out`,
-        {
-          body: acknowledgeRestaurantCharges
-            ? JSON.stringify({ acknowledgeRestaurantCharges })
-            : undefined,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Idempotency-Key": acknowledgeRestaurantCharges
-              ? acknowledgedCheckoutKey
-              : checkoutKey,
-            ...(acknowledgeRestaurantCharges
-              ? { "Content-Type": "application/json" }
-              : {}),
-          },
-          method: "POST",
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/check-out`,
+      {
+        body: acknowledgeRestaurantCharges
+          ? JSON.stringify({ acknowledgeRestaurantCharges })
+          : undefined,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": acknowledgeRestaurantCharges
+            ? acknowledgedCheckoutKey
+            : checkoutKey,
+          ...(acknowledgeRestaurantCharges
+            ? { "Content-Type": "application/json" }
+            : {}),
         },
-      );
-
-    let response = await postCheckout(false);
+        method: "POST",
+      },
+    );
 
     if (!response.ok) {
       const message = await readApiMessage(
@@ -1110,26 +1114,19 @@ export default function PropertiesPage() {
         "Could not check out guest.",
       );
 
-      if (
-        response.status === 400 &&
-        message.startsWith("Review ") &&
-        window.confirm(message)
-      ) {
-        response = await postCheckout(true);
-      } else {
-        setError(message);
+      if (response.status === 400 && message.startsWith("Review ")) {
+        setCheckoutReview({ message, roomId });
         setIsSubmitting(false);
         return;
       }
-    }
 
-    setIsSubmitting(false);
-
-    if (!response.ok) {
-      setError(await readApiMessage(response, "Could not check out guest."));
+      setError(message);
+      setIsSubmitting(false);
       return;
     }
 
+    setCheckoutReview(null);
+    setIsSubmitting(false);
     await loadProperties();
   }
 
@@ -1452,6 +1449,29 @@ export default function PropertiesPage() {
                           >
                             Check out
                           </button>
+                        ) : null}
+                        {checkoutReview?.roomId === room.id ? (
+                          <div className="checkout-review">
+                            <strong>Review room charges</strong>
+                            <p>{checkoutReview.message}</p>
+                            <div className="checkout-review-actions">
+                              <button
+                                className="secondary-button"
+                                disabled={isSubmitting}
+                                onClick={() => setCheckoutReview(null)}
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                disabled={isSubmitting}
+                                onClick={() => checkOutGuest(room.id, true)}
+                                type="button"
+                              >
+                                Confirm checkout
+                              </button>
+                            </div>
+                          </div>
                         ) : null}
                         {data?.canManageStays && !room.activeStay ? (
                           <button
