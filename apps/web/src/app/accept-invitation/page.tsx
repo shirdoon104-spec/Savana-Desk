@@ -16,6 +16,8 @@ import {
   SafeSignOutButton,
   userButtonWithoutSignOutAppearance,
 } from "../components/safe-sign-out-button";
+import { hasValidClerkPublishableKey } from "../components/clerk-config";
+import { ClerkUnavailable } from "../(auth)/components/clerk-unavailable";
 
 function SignedInInviteState() {
   const { user } = useUser();
@@ -51,6 +53,10 @@ function AcceptInvitationContent() {
   const searchParams = useSearchParams();
   const clerkStatus = searchParams.get("__clerk_status");
   const shouldSignIn = clerkStatus === "sign_in";
+
+  if (!hasValidClerkPublishableKey()) {
+    return <ClerkUnavailable action="accept invitations" />;
+  }
 
   return (
     <main className="auth-brand-page">

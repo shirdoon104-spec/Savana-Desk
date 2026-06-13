@@ -2,6 +2,7 @@
 
 import { useClerk } from "@clerk/nextjs";
 import { useEffect } from "react";
+import { hasValidClerkPublishableKey } from "../components/clerk-config";
 
 function clearClientClerkState() {
   for (const storage of [window.localStorage, window.sessionStorage]) {
@@ -16,6 +17,14 @@ function clearClientClerkState() {
 }
 
 export default function SignOutPage() {
+  if (!hasValidClerkPublishableKey()) {
+    return <SignOutFallback />;
+  }
+
+  return <ClerkSignOut />;
+}
+
+function ClerkSignOut() {
   const clerk = useClerk();
 
   useEffect(() => {
@@ -41,6 +50,20 @@ export default function SignOutPage() {
       isMounted = false;
     };
   }, [clerk]);
+
+  return (
+    <main className="auth-page">
+      <section className="sign-out-status" aria-live="polite">
+        <h1>Signing out...</h1>
+      </section>
+    </main>
+  );
+}
+
+function SignOutFallback() {
+  useEffect(() => {
+    window.location.replace("/sign-in");
+  }, []);
 
   return (
     <main className="auth-page">

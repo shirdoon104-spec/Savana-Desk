@@ -2,11 +2,12 @@
 
 import { useAuth, useOrganization } from "@clerk/nextjs";
 import { useState } from "react";
+import { hasValidClerkPublishableKey } from "../../components/clerk-config";
 
 type RequestState = "idle" | "loading" | "success" | "error";
 
 export function TenantContextTester() {
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+  if (!hasValidClerkPublishableKey()) {
     return (
       <section className="notice-panel tenant-test">
         <div>
@@ -33,7 +34,7 @@ function TenantContextTesterInner() {
   );
 
   async function testTenantContext() {
-    if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    if (!hasValidClerkPublishableKey()) {
       setState("error");
       setResult("Clerk publishable key is missing in apps/web/.env.local.");
       return;

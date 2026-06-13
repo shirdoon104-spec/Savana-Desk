@@ -15,6 +15,8 @@ import {
   SafeSignOutButton,
   userButtonWithoutSignOutAppearance,
 } from "../components/safe-sign-out-button";
+import { hasValidClerkPublishableKey } from "../components/clerk-config";
+import { ClerkUnavailable } from "../(auth)/components/clerk-unavailable";
 
 type OperatingModel = "hotel_only" | "hotel_restaurant";
 
@@ -36,6 +38,14 @@ const operatingModels = [
 ];
 
 export default function OnboardingPage() {
+  if (!hasValidClerkPublishableKey()) {
+    return <ClerkUnavailable action="set up a workspace" />;
+  }
+
+  return <OnboardingWorkspace />;
+}
+
+function OnboardingWorkspace() {
   const clerk = useClerk();
   const router = useRouter();
   const { getToken, isLoaded, isSignedIn } = useAuth();

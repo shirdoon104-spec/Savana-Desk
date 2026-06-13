@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { hasValidClerkPublishableKey } from "./components/clerk-config";
 import "./styles.css";
 
 export const metadata: Metadata = {
@@ -38,7 +39,7 @@ export default function RootLayout({
     },
   };
 
-  if (!publishableKey) {
+  if (!hasValidClerkPublishableKey()) {
     return (
       <html lang="en">
         <body>{children}</body>

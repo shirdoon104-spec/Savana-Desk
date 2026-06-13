@@ -1,7 +1,13 @@
 import { TaskChooseOrganization } from "@clerk/nextjs";
 import { Building2 } from "lucide-react";
+import { hasValidClerkPublishableKey } from "../../components/clerk-config";
+import { ClerkUnavailable } from "../../(auth)/components/clerk-unavailable";
 
 export default function ChooseOrganizationTaskPage() {
+  if (!hasValidClerkPublishableKey()) {
+    return <ClerkUnavailable action="choose an organization" />;
+  }
+
   return (
     <main className="auth-brand-page">
       <section className="auth-brand-panel">

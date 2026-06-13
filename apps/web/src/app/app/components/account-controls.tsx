@@ -5,6 +5,7 @@ import {
   SafeSignOutButton,
   userButtonWithoutSignOutAppearance,
 } from "../../components/safe-sign-out-button";
+import { hasValidClerkPublishableKey } from "../../components/clerk-config";
 
 const accountControlAppearance = {
   elements: {
@@ -24,7 +25,7 @@ const accountControlAppearance = {
 };
 
 export function AccountControls() {
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+  if (!hasValidClerkPublishableKey()) {
     return <span className="env-pill">Clerk env missing</span>;
   }
 
