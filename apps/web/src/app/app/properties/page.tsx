@@ -249,6 +249,15 @@ async function readApiMessage(response: Response, fallback: string) {
   }
 }
 
+function createIdempotencyKey(scope: string) {
+  const randomValue =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `${scope}:${randomValue}`;
+}
+
 export default function PropertiesPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
@@ -940,6 +949,9 @@ export default function PropertiesPage() {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Idempotency-Key": createIdempotencyKey(
+            `hotel-check-in:${propertyId}:${roomId}:${reservationId}`,
+          ),
         },
         method: "POST",
       },
@@ -1015,6 +1027,9 @@ export default function PropertiesPage() {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "Idempotency-Key": createIdempotencyKey(
+            `hotel-walk-in:${propertyId}:${checkInRoomId}`,
+          ),
         },
         method: "POST",
       },
@@ -1049,6 +1064,13 @@ export default function PropertiesPage() {
       return;
     }
 
+    const checkoutKey = createIdempotencyKey(
+      `hotel-check-out:${propertyId}:${roomId}`,
+    );
+    const acknowledgedCheckoutKey = createIdempotencyKey(
+      `hotel-check-out-confirmed:${propertyId}:${roomId}`,
+    );
+
     const postCheckout = (acknowledgeRestaurantCharges: boolean) =>
       fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/check-out`,
@@ -1058,6 +1080,9 @@ export default function PropertiesPage() {
             : undefined,
           headers: {
             Authorization: `Bearer ${token}`,
+            "Idempotency-Key": acknowledgeRestaurantCharges
+              ? acknowledgedCheckoutKey
+              : checkoutKey,
             ...(acknowledgeRestaurantCharges
               ? { "Content-Type": "application/json" }
               : {}),
