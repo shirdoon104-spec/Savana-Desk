@@ -129,7 +129,7 @@ model Room {
   roomTypeId        String?
   number            String
   type              String
-  status            String             @default("available")
+  status            RoomStatus         @default(available)
   property          Property           @relation(fields: [propertyId], references: [id])
   roomType          RoomType?          @relation(fields: [roomTypeId], references: [id])
   stays             Stay[]
@@ -141,6 +141,14 @@ model Room {
   @@unique([propertyId, number])
   @@index([tenantId, propertyId, status])
   @@index([tenantId, propertyId, roomTypeId])
+}
+
+enum RoomStatus {
+  available
+  occupied
+  cleaning
+  maintenance
+  out_of_order
 }
 
 model RoomType {
@@ -373,7 +381,7 @@ model Stay {
   roomId             String
   guestId            String
   hotelReservationId String?           @unique
-  status             String            @default("active")
+  status             StayStatus        @default(active)
   checkInAt          DateTime          @default(now())
   expectedCheckOutAt DateTime?
   checkOutAt         DateTime?
@@ -394,6 +402,11 @@ model Stay {
   @@index([tenantId, roomId, status])
   @@index([tenantId, guestId, checkInAt])
   @@index([tenantId, hotelReservationId])
+}
+
+enum StayStatus {
+  active
+  checked_out
 }
 
 model HotelAuditLog {

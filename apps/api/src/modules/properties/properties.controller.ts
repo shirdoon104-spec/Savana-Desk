@@ -68,7 +68,7 @@ class CreatePropertyDto {
   city?: string;
 
   @IsOptional()
-  @IsIn(["USD", "SOS"])
+  @IsIn(["KES", "USD", "SOS"])
   currency?: string;
 
   @IsString()
@@ -858,7 +858,7 @@ export class PropertiesController {
     @CurrentTenant() context: TenantContext,
     @Param("propertyId") propertyId: string,
     @Body() body: CreateRoomsDto,
-  ) {
+  ): Promise<unknown> {
     const property = await this.findTenantProperty(
       context.tenant.id,
       propertyId,
@@ -1162,7 +1162,7 @@ export class PropertiesController {
     @Param("propertyId") propertyId: string,
     @Param("roomId") roomId: string,
     @Body() body: CheckInDto,
-  ) {
+  ): Promise<unknown> {
     await this.findTenantProperty(context.tenant.id, propertyId);
     const room = await this.findTenantRoom(
       context.tenant.id,
@@ -1275,12 +1275,19 @@ export class PropertiesController {
       throw new BadRequestException("Guest first and last name are required.");
     }
 
+    const checkedInAt = new Date();
     const expectedCheckOutAt = body.expectedCheckOutAt
       ? new Date(body.expectedCheckOutAt)
       : (reservation?.departureDate ?? null);
 
     if (expectedCheckOutAt && Number.isNaN(expectedCheckOutAt.getTime())) {
       throw new BadRequestException("Expected check-out date is invalid.");
+    }
+
+    if (expectedCheckOutAt && expectedCheckOutAt <= checkedInAt) {
+      throw new BadRequestException(
+        "Expected check-out date must be after check-in.",
+      );
     }
 
     const stay = await this.prisma.$transaction(async (tx) => {
@@ -1297,6 +1304,7 @@ export class PropertiesController {
       const createdStay = await tx.stay.create({
         data: {
           checkedInByUserId: context.tenantUser.clerkUserId,
+          checkInAt: checkedInAt,
           expectedCheckOutAt,
           guestId: guest.id,
           hotelReservationId: reservation?.id ?? null,
@@ -1379,7 +1387,7 @@ export class PropertiesController {
     @Param("propertyId") propertyId: string,
     @Param("roomId") roomId: string,
     @Body() body: CheckOutDto,
-  ) {
+  ): Promise<unknown> {
     await this.findTenantProperty(context.tenant.id, propertyId);
     const room = await this.findTenantRoom(
       context.tenant.id,
@@ -1388,6 +1396,7 @@ export class PropertiesController {
     );
     const activeStay = await this.prisma.stay.findFirst({
       where: {
+        propertyId,
         roomId,
         status: "active",
         tenantId: context.tenant.id,
@@ -1396,7 +1405,31 @@ export class PropertiesController {
     });
 
     if (!activeStay) {
+      const completedStay = await this.prisma.stay.findFirst({
+        where: {
+          propertyId,
+          roomId,
+          status: "checked_out",
+          tenantId: context.tenant.id,
+        },
+        include: {
+          guest: true,
+          room: true,
+        },
+        orderBy: { checkOutAt: "desc" },
+      });
+
+      if (completedStay) {
+        return completedStay;
+      }
+
       throw new BadRequestException("This room does not have an active stay.");
+    }
+
+    if (room.status !== "occupied") {
+      throw new BadRequestException(
+        "Only occupied rooms with an active stay can be checked out.",
+      );
     }
 
     const restaurantCharges = await this.prisma.folioCharge.findMany({
@@ -1486,16 +1519,16 @@ export class PropertiesController {
     @Param("propertyId") propertyId: string,
     @Param("roomId") roomId: string,
     @Body() body: UpdateRoomStatusDto,
-  ) {
-    const status = body.status?.trim();
+  ): Promise<unknown> {
+    const status = body.status;
 
-    if (!status || !roomStatuses.includes(status as RoomStatus)) {
+    if (!roomStatuses.includes(status)) {
       throw new BadRequestException("Choose a valid room status.");
     }
 
     const allowedStatuses = allowedRoomStatusesForRole(context.role);
 
-    if (!allowedStatuses.includes(status as RoomStatus)) {
+    if (!allowedStatuses.includes(status)) {
       throw new BadRequestException(
         "Your role cannot set rooms to that status.",
       );

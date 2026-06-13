@@ -56,14 +56,14 @@ The existing app currently uses `cleaning` immediately after checkout. Add `dirt
 
 Goal: make the current hotel module safer without changing the product shape too much.
 
-- [ ] Replace new hotel workflow free-form status fields with Prisma enums where practical.
+- [x] Replace new hotel workflow free-form status fields with Prisma enums where practical.
 - [x] Add audit logging for room status changes.
 - [x] Add audit logging for check-in and checkout.
 - [x] Add idempotency keys for check-in and checkout endpoints.
-- [ ] Add stronger checkout validation for active stay and room state.
+- [x] Add stronger checkout validation for active stay and room state.
 - [x] Prevent manual room status changes that conflict with active stays.
 - [ ] Add basic hotel smoke tests for property, rooms, check-in, restaurant room charge, and checkout.
-- [ ] Add clear errors for unsupported currency and invalid checkout dates.
+- [x] Add clear errors for unsupported currency and invalid checkout dates.
 
 Current endpoints to harden:
 
