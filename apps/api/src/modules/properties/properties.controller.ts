@@ -1277,7 +1277,7 @@ export class PropertiesController {
 
     const checkedInAt = new Date();
     const expectedCheckOutAt = body.expectedCheckOutAt
-      ? new Date(body.expectedCheckOutAt)
+      ? this.parseExpectedCheckOutAt(body.expectedCheckOutAt)
       : (reservation?.departureDate ?? null);
 
     if (expectedCheckOutAt && Number.isNaN(expectedCheckOutAt.getTime())) {
@@ -1562,9 +1562,7 @@ export class PropertiesController {
     }
 
     if (!activeStay && status === "occupied") {
-      throw new BadRequestException(
-        "Use check-in to mark a room as occupied.",
-      );
+      throw new BadRequestException("Use check-in to mark a room as occupied.");
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -1843,6 +1841,21 @@ export class PropertiesController {
     return new Date(
       Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
     );
+  }
+
+  private parseExpectedCheckOutAt(value: string) {
+    const trimmedValue = value.trim();
+    const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmedValue);
+
+    if (dateOnlyMatch) {
+      const [, year, month, day] = dateOnlyMatch;
+
+      return new Date(
+        Date.UTC(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999),
+      );
+    }
+
+    return new Date(trimmedValue);
   }
 
   private optionalNonNegativeInteger(value: number | string | undefined) {

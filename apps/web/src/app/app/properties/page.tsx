@@ -258,6 +258,13 @@ function createIdempotencyKey(scope: string) {
   return `${scope}:${randomValue}`;
 }
 
+function dateInputDaysFromNow(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+
+  return date.toISOString().slice(0, 10);
+}
+
 export default function PropertiesPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { organization } = useOrganization();
@@ -321,6 +328,10 @@ export default function PropertiesPage() {
   const [guestEmail, setGuestEmail] = useState("");
   const [expectedCheckOutAt, setExpectedCheckOutAt] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const earliestExpectedCheckOutDate = useMemo(
+    () => dateInputDaysFromNow(1),
+    [],
+  );
 
   const selectedProperty = useMemo(
     () =>
@@ -1445,11 +1456,20 @@ export default function PropertiesPage() {
                         {data?.canManageStays && !room.activeStay ? (
                           <button
                             className="secondary-button"
-                            onClick={() =>
-                              setCheckInRoomId((current) =>
-                                current === room.id ? "" : room.id,
-                              )
-                            }
+                            onClick={() => {
+                              setCheckInRoomId((current) => {
+                                if (current === room.id) {
+                                  return "";
+                                }
+
+                                setExpectedCheckOutAt(
+                                  (currentDate) =>
+                                    currentDate || earliestExpectedCheckOutDate,
+                                );
+
+                                return room.id;
+                              });
+                            }}
                             type="button"
                           >
                             {checkInRoomId === room.id ? "Cancel" : "Check in"}
@@ -1505,6 +1525,7 @@ export default function PropertiesPage() {
                                 onChange={(event) =>
                                   setExpectedCheckOutAt(event.target.value)
                                 }
+                                min={earliestExpectedCheckOutDate}
                                 type="date"
                                 value={expectedCheckOutAt}
                               />
