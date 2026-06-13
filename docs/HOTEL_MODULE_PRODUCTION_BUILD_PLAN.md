@@ -1,6 +1,6 @@
 # Hotel Module Production Build Plan
 
-Last reviewed: 2026-06-03
+Last reviewed: 2026-06-13
 
 This plan is the implementation source of truth for hardening the hotel operations module before the finance and inventory build. Work through phases in order. The goal is to bring hotel operations to the same production-readiness level as the restaurant module.
 
@@ -57,11 +57,11 @@ The existing app currently uses `cleaning` immediately after checkout. Add `dirt
 Goal: make the current hotel module safer without changing the product shape too much.
 
 - [ ] Replace new hotel workflow free-form status fields with Prisma enums where practical.
-- [ ] Add audit logging for room status changes.
-- [ ] Add audit logging for check-in and checkout.
+- [x] Add audit logging for room status changes.
+- [x] Add audit logging for check-in and checkout.
 - [ ] Add idempotency keys for check-in and checkout endpoints.
 - [ ] Add stronger checkout validation for active stay and room state.
-- [ ] Prevent manual room status changes that conflict with active stays.
+- [x] Prevent manual room status changes that conflict with active stays.
 - [ ] Add basic hotel smoke tests for property, rooms, check-in, restaurant room charge, and checkout.
 - [ ] Add clear errors for unsupported currency and invalid checkout dates.
 
@@ -91,9 +91,9 @@ Goal: stop treating room type as a plain string and prepare for automatic room c
 - [x] Add seasonal/date-range pricing.
 - [x] Add property-level default currency.
 - [x] Add server-side rate lookup helper.
-- [ ] Build room type and rate plan management UI.
+- [x] Build room type and rate plan management UI.
 
-Status as of 2026-06-03: first model slice implemented. The Prisma schema now includes `RoomType`, `RatePlan`, `RoomRate`, and `CancellationPolicy`; `Room.roomTypeId` links rooms to a first-class room type while preserving the existing `Room.type` snapshot. The migration backfills existing room snapshots into legacy room type records, and room batch creation now creates or reuses a room type for new rooms. `HotelRateLookupService` now resolves reservation overrides, date-bounded room rates, rate plan defaults, and room type defaults, and `GET /properties/:propertyId/rates/lookup` exposes a guarded server-side lookup. Rate plan management UI remains next.
+Status as of 2026-06-03: Phase 1 is implemented. The Prisma schema now includes `RoomType`, `RatePlan`, `RoomRate`, and `CancellationPolicy`; `Room.roomTypeId` links rooms to a first-class room type while preserving the existing `Room.type` snapshot. The migration backfills existing room snapshots into legacy room type records, and room batch creation now creates or reuses a room type for new rooms. `HotelRateLookupService` now resolves reservation overrides, date-bounded room rates, rate plan defaults, and room type defaults, and `GET /properties/:propertyId/rates/lookup` exposes a guarded server-side lookup. The property workspace now has room type, rate plan, date-rate, and quote-check management panels.
 
 Minimum models:
 
@@ -143,20 +143,22 @@ Suggested statuses:
 
 Goal: add proper hotel reservations before check-in.
 
-- [ ] Add `HotelReservation` model.
-- [ ] Add `HotelReservationGuest` or link reservation to `Guest`.
-- [ ] Add reservation status workflow.
-- [ ] Add arrival and departure dates.
-- [ ] Add room type requested.
-- [ ] Add optional room assignment before arrival.
-- [ ] Add deposit requirement fields.
-- [ ] Add reservation guarantee support.
-- [ ] Add source/channel field: walk-in, phone, direct, OTA, corporate.
-- [ ] Add notes and special requests.
+- [x] Add `HotelReservation` model.
+- [x] Add `HotelReservationGuest` or link reservation to `Guest`.
+- [x] Add reservation status workflow.
+- [x] Add arrival and departure dates.
+- [x] Add room type requested.
+- [x] Add optional room assignment before arrival.
+- [x] Add deposit requirement fields.
+- [x] Add reservation guarantee support.
+- [x] Add source/channel field: walk-in, phone, direct, OTA, corporate.
+- [x] Add notes and special requests.
 - [ ] Add reservation confirmation notification.
-- [ ] Add reservation list/calendar UI.
-- [ ] Add availability search by date, room type, and property.
-- [ ] Convert reservation to stay during check-in.
+- [x] Add reservation list/calendar UI.
+- [x] Add availability search by date, room type, and property.
+- [x] Convert reservation to stay during check-in.
+
+Status as of 2026-06-03: first reservation slice implemented. The database now has `HotelReservation`, `HotelReservationGuest`, and `ReservationGuarantee` with typed reservation status/source/guarantee enums. `Stay` can now link back to the hotel reservation that created it. The property API lists and creates hotel reservations, updates reservation status, checks availability by date/room type/property, blocks assigned-room overlaps with active stays or active reservations, and converts confirmed/guaranteed reservations into active stays during check-in. The property workspace now includes a hotel reservations panel with a booking form, arrival list, and assigned-room check-in action. Confirmation notifications remain next.
 
 Reservation statuses:
 

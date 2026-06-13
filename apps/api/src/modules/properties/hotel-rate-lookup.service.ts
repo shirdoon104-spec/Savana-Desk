@@ -156,7 +156,10 @@ export class HotelRateLookupService {
       ratePlan?.currency ?? roomType.defaultCurrency ?? propertyCurrency;
 
     return nights.map<NightlyRate>((date) => ({
-      baseOccupancy: ratePlan?.baseOccupancy ?? roomType.baseOccupancy,
+      baseOccupancy: this.effectiveBaseOccupancy(
+        roomType.baseOccupancy,
+        ratePlan?.baseOccupancy,
+      ),
       baseRate,
       currency,
       date,
@@ -200,7 +203,10 @@ export class HotelRateLookupService {
 
       if (roomRate) {
         nightlyRates.push({
-          baseOccupancy: roomRate.baseOccupancy,
+          baseOccupancy: this.effectiveBaseOccupancy(
+            roomType.baseOccupancy,
+            roomRate.baseOccupancy,
+          ),
           baseRate: roomRate.baseRate,
           currency: roomRate.currency,
           date,
@@ -215,7 +221,10 @@ export class HotelRateLookupService {
 
       if (ratePlan?.defaultRate) {
         nightlyRates.push({
-          baseOccupancy: ratePlan.baseOccupancy,
+          baseOccupancy: this.effectiveBaseOccupancy(
+            roomType.baseOccupancy,
+            ratePlan.baseOccupancy,
+          ),
           baseRate: ratePlan.defaultRate,
           currency: ratePlan.currency,
           date,
@@ -249,6 +258,17 @@ export class HotelRateLookupService {
     }
 
     return nightlyRates;
+  }
+
+  private effectiveBaseOccupancy(
+    roomTypeBaseOccupancy: number,
+    configuredBaseOccupancy?: number | null,
+  ) {
+    if (!configuredBaseOccupancy || configuredBaseOccupancy <= 1) {
+      return roomTypeBaseOccupancy;
+    }
+
+    return configuredBaseOccupancy;
   }
 
   private async findDefaultRatePlan(input: RateLookupInput) {

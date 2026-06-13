@@ -19,12 +19,16 @@
   --gold-soft: #fff7e8;
   --danger: #b42318;
   --danger-soft: #fff1f0;
-  --shadow-sm: 0 1px 2px rgba(7, 17, 31, 0.05), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  --shadow-sm:
+    0 1px 2px rgba(7, 17, 31, 0.05), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
   --shadow-md: 0 18px 45px rgba(7, 17, 31, 0.08);
   --shadow-lg: 0 32px 90px rgba(7, 17, 31, 0.14);
-  --button-shadow: 0 10px 18px rgba(8, 127, 140, 0.18), 0 1px 0 rgba(255, 255, 255, 0.34) inset;
-  --button-shadow-hover: 0 16px 30px rgba(8, 127, 140, 0.24), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
-  --control-shadow: 0 1px 2px rgba(7, 17, 31, 0.06), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+  --button-shadow:
+    0 10px 18px rgba(8, 127, 140, 0.18), 0 1px 0 rgba(255, 255, 255, 0.34) inset;
+  --button-shadow-hover:
+    0 16px 30px rgba(8, 127, 140, 0.24), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  --control-shadow:
+    0 1px 2px rgba(7, 17, 31, 0.06), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
   --radius: 8px;
   --radius-lg: 12px;
   --sidebar-width: 232px;
@@ -47,12 +51,21 @@ html {
 body {
   margin: 0;
   background:
-    radial-gradient(circle at 12% -8%, rgba(37, 99, 235, 0.13), transparent 28%),
+    radial-gradient(
+      circle at 12% -8%,
+      rgba(37, 99, 235, 0.13),
+      transparent 28%
+    ),
     radial-gradient(circle at 88% 0%, rgba(8, 127, 140, 0.12), transparent 28%),
     linear-gradient(180deg, #f7fbff 0, var(--background) 340px);
   color: var(--ink);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     sans-serif;
   line-height: 1.5;
   max-width: 100%;
@@ -123,7 +136,10 @@ nav a {
   min-width: 0;
   min-height: 44px;
   padding: 10px 12px;
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
 }
 
 nav a svg {
@@ -205,7 +221,13 @@ button {
   padding: 0 18px;
   position: relative;
   touch-action: manipulation;
-  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.16s ease;
   user-select: none;
   white-space: nowrap;
 }
@@ -237,8 +259,10 @@ input {
 select {
   appearance: none;
   background:
-    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 18px) 50% / 6px 6px no-repeat,
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 13px) 50% / 6px 6px no-repeat,
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 18px)
+      50% / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 13px)
+      50% / 6px 6px no-repeat,
     #ffffff;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -292,7 +316,10 @@ select:focus {
   font-weight: 850;
   min-height: 44px;
   padding: 0 18px;
-  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition:
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
 }
 
 .topbar > .button-link {
@@ -316,7 +343,11 @@ select:focus {
   font-weight: 850;
   min-height: 44px;
   padding: 0 18px;
-  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
 }
 
 .secondary-link:hover {
@@ -347,7 +378,10 @@ select:focus {
   color: var(--ink-strong) !important;
   min-height: 42px !important;
   padding: 4px 12px 4px 6px !important;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease !important;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease !important;
 }
 
 .account-control-trigger:hover,
@@ -499,7 +533,11 @@ select:focus {
 .auth-brand-page {
   align-items: center;
   background:
-    radial-gradient(circle at 82% 18%, rgba(15, 118, 110, 0.14), transparent 30%),
+    radial-gradient(
+      circle at 82% 18%,
+      rgba(15, 118, 110, 0.14),
+      transparent 30%
+    ),
     linear-gradient(90deg, #f8fafc 0%, #f8fafc 50%, #eef7f5 50%, #eef7f5 100%);
   display: flex;
   min-height: 100vh;
@@ -758,7 +796,11 @@ select:focus {
   min-height: 170px;
   padding: 18px;
   text-align: left;
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .choice-card:hover,
@@ -895,7 +937,9 @@ select:focus {
   justify-content: space-between;
   gap: 16px;
   padding: 14px;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .team-row:hover {
@@ -949,7 +993,9 @@ select:focus {
 .danger-button {
   background: linear-gradient(180deg, #ffffff 0%, #fff7f7 100%);
   border: 1px solid #fecdca;
-  box-shadow: 0 1px 2px rgba(180, 35, 24, 0.06), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+  box-shadow:
+    0 1px 2px rgba(180, 35, 24, 0.06),
+    0 1px 0 rgba(255, 255, 255, 0.85) inset;
   color: #b42318;
   min-height: 36px;
   padding: 0 12px;
@@ -1007,7 +1053,11 @@ select:focus {
 .operations-header {
   align-items: center;
   background:
-    radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.12), transparent 34%),
+    radial-gradient(
+      circle at 100% 0%,
+      rgba(37, 99, 235, 0.12),
+      transparent 34%
+    ),
     linear-gradient(135deg, #ffffff 0%, #ffffff 56%, #eef8f5 100%);
   border-color: rgba(189, 203, 224, 0.82);
   border-radius: var(--radius-lg);
@@ -1067,6 +1117,29 @@ select:focus {
   width: 100%;
 }
 
+.workbench-jump-nav a {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 850;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 0;
+  padding: 10px 13px;
+  text-align: center;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+  white-space: nowrap;
+}
+
 .workbench-jump-nav button strong {
   color: inherit;
   font-size: 14px;
@@ -1086,7 +1159,9 @@ select:focus {
 
 .workbench-jump-nav button:hover,
 .workbench-jump-nav button:focus-visible,
-.workbench-jump-nav button[data-active="true"] {
+.workbench-jump-nav button[data-active="true"],
+.workbench-jump-nav a:hover,
+.workbench-jump-nav a:focus-visible {
   background: linear-gradient(180deg, #ffffff 0%, #eef8f5 100%);
   border-color: rgba(8, 127, 140, 0.34);
   color: var(--ink-strong);
@@ -1094,10 +1169,17 @@ select:focus {
 
 .workbench-jump-nav button[data-active="true"] {
   border-color: rgba(8, 127, 140, 0.62);
-  box-shadow: 0 12px 26px rgba(8, 127, 140, 0.14), inset 0 -3px 0 var(--accent);
+  box-shadow:
+    0 12px 26px rgba(8, 127, 140, 0.14),
+    inset 0 -3px 0 var(--accent);
 }
 
 .workbench-jump-nav button:not([data-active="true"]):hover {
+  box-shadow: 0 10px 22px rgba(7, 17, 31, 0.08);
+  transform: translateY(-1px);
+}
+
+.workbench-jump-nav a:hover {
   box-shadow: 0 10px 22px rgba(7, 17, 31, 0.08);
   transform: translateY(-1px);
 }
@@ -1472,36 +1554,40 @@ select:focus {
 .property-layout {
   align-items: flex-start;
   display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
 .property-list {
   display: grid;
   gap: 12px;
-  grid-template-columns: 1fr;
-  max-height: calc(100dvh - 170px);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  max-height: none;
   min-width: 0;
-  overflow: auto;
+  overflow: visible;
   position: sticky;
-  top: 152px;
+  top: 150px;
+  z-index: 16;
 }
 
 .property-card {
-  background:
-    linear-gradient(180deg, #ffffff 0%, #f8fbfb 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfb 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--ink);
   display: grid;
   gap: 6px;
   justify-items: start;
-  min-height: 112px;
+  min-height: 104px;
   min-width: 0;
   padding: 18px;
   text-align: left;
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .property-card:hover,
@@ -1515,7 +1601,9 @@ select:focus {
 
 .property-card[data-selected="true"] {
   border-color: rgba(8, 127, 140, 0.72);
-  box-shadow: 0 20px 38px rgba(8, 127, 140, 0.16), inset 0 0 0 1px rgba(8, 127, 140, 0.08);
+  box-shadow:
+    0 20px 38px rgba(8, 127, 140, 0.16),
+    inset 0 0 0 1px rgba(8, 127, 140, 0.08);
 }
 
 .property-card svg {
@@ -1532,8 +1620,108 @@ select:focus {
 .property-detail {
   display: grid;
   gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   width: 100%;
+}
+
+.hotel-dashboard-panel,
+.property-detail-card,
+#add-rooms,
+#rate-management,
+#hotel-reservations {
+  grid-column: 1;
+  grid-row: auto;
+}
+
+.hotel-dashboard-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.hotel-dashboard-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.hotel-kpi-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfb 100%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 6px;
+  min-height: 132px;
+  padding: 18px;
+}
+
+.hotel-kpi-card span,
+.hotel-kpi-card small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.hotel-kpi-card strong {
+  color: var(--ink-strong);
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1;
+}
+
+.hotel-overview-workbench {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
+}
+
+.hotel-overview-column {
+  background: #f8fbfb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.hotel-arrival-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.hotel-arrival-preview button {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-height: 62px;
+  padding: 12px 14px;
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.hotel-arrival-preview button:hover,
+.hotel-arrival-preview button:focus-visible {
+  border-color: rgba(8, 127, 140, 0.42);
+  box-shadow: 0 12px 24px rgba(7, 17, 31, 0.08);
+  transform: translateY(-1px);
+}
+
+.hotel-arrival-preview strong {
+  color: var(--ink-strong);
+}
+
+.hotel-arrival-preview span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .restaurant-workspace-layout {
@@ -1564,8 +1752,7 @@ select:focus {
 }
 
 .property-detail-card {
-  background:
-    linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
   border-radius: var(--radius-lg);
   padding: 30px;
 }
@@ -1577,7 +1764,7 @@ select:focus {
 .room-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
   margin-top: 22px;
   min-width: 0;
 }
@@ -1595,7 +1782,7 @@ select:focus {
 .room-status-counts {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   min-width: 0;
 }
 
@@ -1606,7 +1793,7 @@ select:focus {
   display: grid;
   gap: 8px;
   justify-items: start;
-  min-height: 88px;
+  min-height: 78px;
   min-width: 0;
   overflow: hidden;
   padding: 14px;
@@ -1652,7 +1839,7 @@ select:focus {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  max-width: 680px;
+  max-width: none;
 }
 
 .room-filter-row label {
@@ -1664,8 +1851,7 @@ select:focus {
 }
 
 .room-card {
-  background:
-    linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   display: grid;
@@ -1674,7 +1860,10 @@ select:focus {
   overflow: hidden;
   padding: 16px;
   position: relative;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .room-card::before {
@@ -1802,7 +1991,11 @@ select:focus {
   align-items: end;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+}
+
+.inventory-form button {
+  grid-column: 1 / -1;
 }
 
 .inventory-form label {
@@ -1811,6 +2004,284 @@ select:focus {
   font-size: 14px;
   font-weight: 700;
   gap: 6px;
+}
+
+.rate-management {
+  display: grid;
+  gap: 16px;
+  max-width: none;
+}
+
+.rate-management-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.rate-management-header h2 {
+  margin-bottom: 0;
+}
+
+.rate-management-header > span {
+  background: var(--gold-soft);
+  border: 1px solid #f6d68f;
+  border-radius: 999px;
+  color: #8a4f11;
+  font-size: 13px;
+  font-weight: 850;
+  padding: 7px 10px;
+}
+
+.rate-workspace-tabs {
+  background: #f8fbfb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 6px;
+}
+
+.rate-workspace-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 850;
+  min-height: 42px;
+  padding: 9px 12px;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease;
+}
+
+.rate-workspace-tabs button:hover,
+.rate-workspace-tabs button:focus-visible,
+.rate-workspace-tabs button[data-selected="true"] {
+  background: #ffffff;
+  border-color: rgba(8, 127, 140, 0.34);
+  box-shadow: var(--control-shadow);
+  color: var(--ink-strong);
+}
+
+.rate-management-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rate-form,
+.rate-lookup-form {
+  background: #f8fbfb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.rate-form-title {
+  align-items: center;
+  color: var(--ink-strong);
+  display: flex;
+  font-weight: 850;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.rate-form-title svg {
+  background: var(--accent-soft);
+  border-radius: 999px;
+  color: var(--accent);
+  height: 30px;
+  padding: 6px;
+  width: 30px;
+}
+
+.rate-form label,
+.rate-lookup-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 750;
+  gap: 5px;
+}
+
+.rate-field-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rate-lists {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rate-lists h3 {
+  color: var(--ink-strong);
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+
+.rate-table {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  overflow: hidden;
+}
+
+.rate-row {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(120px, 1fr) minmax(88px, 0.75fr);
+  min-height: 54px;
+  padding: 10px 12px;
+}
+
+.rate-row:last-child {
+  border-bottom: 0;
+}
+
+.rate-row strong {
+  color: var(--ink-strong);
+  overflow-wrap: anywhere;
+}
+
+.rate-row span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rate-row span:nth-of-type(n + 3) {
+  display: none;
+}
+
+.rate-lookup-form {
+  align-items: end;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 auto;
+  max-width: 980px;
+  width: 100%;
+}
+
+.rate-lookup-form .rate-form-title {
+  align-self: center;
+  grid-column: 1 / -1;
+}
+
+.rate-lookup-form button,
+.rate-quote {
+  grid-column: 1 / -1;
+}
+
+.rate-quote {
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  border-radius: var(--radius);
+  color: #067647;
+  display: grid;
+  gap: 2px;
+  min-height: 54px;
+  min-width: 180px;
+  padding: 8px 10px;
+}
+
+.rate-quote strong {
+  font-size: 18px;
+}
+
+.rate-quote span {
+  color: #047857;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.reservation-management {
+  display: grid;
+  gap: 16px;
+  max-width: none;
+}
+
+.reservation-workbench {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(320px, 0.42fr) minmax(0, 1fr);
+}
+
+.reservation-booking-form {
+  background: #f8fbfb;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.reservation-booking-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 750;
+  gap: 5px;
+}
+
+.reservation-arrival-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.reservation-row {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns:
+    minmax(150px, 1.1fr) minmax(190px, 1.4fr) minmax(150px, 1fr)
+    150px minmax(110px, auto);
+  min-height: 74px;
+  padding: 12px 14px;
+}
+
+.reservation-row:last-child {
+  border-bottom: 0;
+}
+
+.reservation-row strong {
+  color: var(--ink-strong);
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.reservation-row span,
+.reservation-row small {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.reservation-row select {
+  font-weight: 800;
+  text-transform: capitalize;
 }
 
 .restaurant-table-grid {
@@ -1893,8 +2364,7 @@ select:focus {
 }
 
 .restaurant-table-card {
-  background:
-    linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--ink);
@@ -1906,7 +2376,10 @@ select:focus {
   min-height: 162px;
   padding: 16px;
   text-align: left;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .restaurant-table-card:hover,
@@ -2140,7 +2613,9 @@ select:focus {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(150px, 1.2fr) 90px minmax(180px, 1fr) minmax(140px, 1fr) 130px minmax(180px, 1fr) auto;
+  grid-template-columns:
+    minmax(150px, 1.2fr) 90px minmax(180px, 1fr) minmax(140px, 1fr)
+    130px minmax(180px, 1fr) auto;
 }
 
 .modal-form {
@@ -2264,7 +2739,9 @@ select:focus {
 .reservation-primary-fields {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1.4fr) 100px minmax(190px, 1fr) minmax(150px, 1fr) 140px;
+  grid-template-columns:
+    minmax(180px, 1.4fr) 100px minmax(190px, 1fr) minmax(150px, 1fr)
+    140px;
 }
 
 .reservation-notes {
@@ -2516,7 +2993,9 @@ select:focus {
 .pos-category-tabs button[data-selected="true"] {
   background: linear-gradient(180deg, #f2fffb 0%, #e7f7f8 100%);
   border-color: #99d6ca;
-  box-shadow: inset 0 0 0 1px rgba(8, 127, 140, 0.08), var(--control-shadow);
+  box-shadow:
+    inset 0 0 0 1px rgba(8, 127, 140, 0.08),
+    var(--control-shadow);
   color: var(--accent-strong);
 }
 
@@ -2816,7 +3295,9 @@ select:focus {
 .payment-split-tabs button[data-selected="true"] {
   background: linear-gradient(180deg, #f2fffb 0%, #e7f7f8 100%);
   border-color: #99d6ca;
-  box-shadow: inset 0 0 0 1px rgba(8, 127, 140, 0.08), var(--control-shadow);
+  box-shadow:
+    inset 0 0 0 1px rgba(8, 127, 140, 0.08),
+    var(--control-shadow);
   color: var(--accent-strong);
 }
 
@@ -2916,7 +3397,9 @@ select:focus {
 .payment-method-grid button[data-selected="true"] {
   background: linear-gradient(180deg, #f2fffb 0%, #e7f7f8 100%);
   border-color: #99d6ca;
-  box-shadow: inset 0 0 0 1px rgba(8, 127, 140, 0.08), var(--control-shadow);
+  box-shadow:
+    inset 0 0 0 1px rgba(8, 127, 140, 0.08),
+    var(--control-shadow);
   color: var(--accent-strong);
 }
 
@@ -3031,7 +3514,9 @@ select:focus {
 .manager-action-tabs button[data-selected="true"] {
   background: linear-gradient(180deg, #ffffff 0%, #f2f4f7 100%);
   border-color: #98a2b3;
-  box-shadow: inset 0 0 0 1px rgba(52, 64, 84, 0.06), var(--control-shadow);
+  box-shadow:
+    inset 0 0 0 1px rgba(52, 64, 84, 0.06),
+    var(--control-shadow);
   color: var(--ink-strong);
 }
 
@@ -3414,8 +3899,7 @@ select:focus {
 
 .kitchen-column {
   align-content: flex-start;
-  background:
-    linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
   display: grid;
   gap: 16px;
   max-width: none;
@@ -3472,7 +3956,11 @@ select:focus {
 
 .public-menu-shell {
   background:
-    radial-gradient(circle at 8% -10%, rgba(37, 99, 235, 0.12), transparent 30%),
+    radial-gradient(
+      circle at 8% -10%,
+      rgba(37, 99, 235, 0.12),
+      transparent 30%
+    ),
     linear-gradient(180deg, #fbf8f1 0%, #f4f7fb 100%);
   color: var(--ink);
   display: grid;
@@ -3769,14 +4257,16 @@ select:focus {
 
 .status-grid div,
 .module-card {
-  background:
-    linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   min-height: 106px;
   padding: 18px 20px;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .status-grid span,
@@ -3868,6 +4358,16 @@ select:focus {
   }
 }
 
+@media (min-width: 1540px) {
+  .property-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .room-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
 .module-card svg {
   color: var(--accent);
 }
@@ -3878,6 +4378,60 @@ select:focus {
   *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 1240px) {
+  .property-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .property-detail-card,
+  #add-rooms,
+  #rate-management,
+  #hotel-reservations {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .rate-management-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .rate-lists {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rate-row {
+    grid-template-columns: minmax(130px, 1.2fr) repeat(3, minmax(90px, 1fr));
+  }
+
+  .rate-row span:nth-of-type(n + 3) {
+    display: inline;
+  }
+
+  .rate-lookup-form {
+    grid-template-columns:
+      minmax(150px, 1.2fr) minmax(150px, 1.2fr) repeat(3, minmax(130px, 1fr))
+      auto;
+  }
+
+  .rate-lookup-form .rate-form-title,
+  .rate-lookup-form button,
+  .rate-quote {
+    grid-column: auto;
+  }
+
+  .reservation-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hotel-dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hotel-overview-workbench {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -3929,9 +4483,16 @@ select:focus {
   }
 
   .property-layout,
+  .property-detail,
+  .hotel-dashboard-grid,
+  .hotel-overview-workbench,
   .pos-order-builder,
   .public-menu-layout,
   .modal-form,
+  .rate-management-grid,
+  .rate-lists,
+  .rate-lookup-form,
+  .reservation-workbench,
   .kitchen-board {
     grid-template-columns: 1fr;
   }
@@ -3951,6 +4512,7 @@ select:focus {
   .payment-drawer-header,
   .live-dashboard-header,
   .manager-action-header,
+  .rate-management-header,
   .restaurant-report-panel,
   .offline-review-item {
     align-items: stretch;
@@ -4001,16 +4563,19 @@ select:focus {
   .reservation-primary-fields,
   .reservation-item-picker-header,
   .reservation-modal-items .reservation-item-row,
-    .order-draft-row,
-    .order-compact-row,
-    .pos-ticket-row,
-    .restaurant-menu-form,
-    .property-layout,
+  .order-draft-row,
+  .order-compact-row,
+  .pos-ticket-row,
+  .restaurant-menu-form,
+  .property-layout,
   .room-grid,
   .table-service-form,
   .table-service-panel,
   .restaurant-table-grid,
   .restaurant-order-form,
+  .rate-field-row,
+  .rate-row,
+  .reservation-row,
   .room-status-counts,
   .room-filter-row,
   .inventory-form {

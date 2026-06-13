@@ -21,6 +21,7 @@ model Tenant {
   properties            Property[]
   users                 TenantUser[]
   stays                 Stay[]
+  hotelAuditLogs        HotelAuditLog[]
   staffInvitations      StaffInvitation[]
 }
 
@@ -60,23 +61,25 @@ model StaffInvitation {
 }
 
 model Property {
-  id                String       @id @default(cuid())
+  id                String             @id @default(cuid())
   tenantId          String
   name              String
   city              String?
   roomCount         Int?
-  timezone          String       @default("Africa/Mogadishu")
-  currency          String       @default("USD")
+  timezone          String             @default("Africa/Mogadishu")
+  currency          String             @default("USD")
   taxRate           Decimal?
   serviceChargeRate Decimal?
-  tenant            Tenant       @relation(fields: [tenantId], references: [id])
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
   rooms             Room[]
   roomTypes         RoomType[]
   ratePlans         RatePlan[]
   stays             Stay[]
+  hotelAuditLogs    HotelAuditLog[]
+  hotelReservations HotelReservation[]
   restaurants       Restaurant[]
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([tenantId])
 }
@@ -120,18 +123,20 @@ model KitchenStation {
 }
 
 model Room {
-  id         String    @id @default(cuid())
-  tenantId   String
-  propertyId String
-  roomTypeId String?
-  number     String
-  type       String
-  status     String    @default("available")
-  property   Property  @relation(fields: [propertyId], references: [id])
-  roomType   RoomType? @relation(fields: [roomTypeId], references: [id])
-  stays      Stay[]
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                String             @id @default(cuid())
+  tenantId          String
+  propertyId        String
+  roomTypeId        String?
+  number            String
+  type              String
+  status            String             @default("available")
+  property          Property           @relation(fields: [propertyId], references: [id])
+  roomType          RoomType?          @relation(fields: [roomTypeId], references: [id])
+  stays             Stay[]
+  hotelAuditLogs    HotelAuditLog[]
+  hotelReservations HotelReservation[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@unique([propertyId, number])
   @@index([tenantId, propertyId, status])
@@ -139,23 +144,24 @@ model Room {
 }
 
 model RoomType {
-  id              String     @id @default(cuid())
-  tenantId        String
-  propertyId      String
-  name            String
-  code            String
-  description     String?
-  baseOccupancy   Int        @default(1)
-  maxOccupancy    Int?
-  defaultCurrency String     @default("USD")
-  defaultRate     Decimal?
-  isActive        Boolean    @default(true)
-  property        Property   @relation(fields: [propertyId], references: [id])
-  rooms           Room[]
-  ratePlans       RatePlan[]
-  roomRates       RoomRate[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                String             @id @default(cuid())
+  tenantId          String
+  propertyId        String
+  name              String
+  code              String
+  description       String?
+  baseOccupancy     Int                @default(1)
+  maxOccupancy      Int?
+  defaultCurrency   String             @default("USD")
+  defaultRate       Decimal?
+  isActive          Boolean            @default(true)
+  property          Property           @relation(fields: [propertyId], references: [id])
+  rooms             Room[]
+  ratePlans         RatePlan[]
+  roomRates         RoomRate[]
+  hotelReservations HotelReservation[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@unique([propertyId, code])
   @@index([tenantId, propertyId, isActive])
@@ -179,6 +185,7 @@ model RatePlan {
   roomType           RoomType?           @relation(fields: [roomTypeId], references: [id])
   roomRates          RoomRate[]
   cancellationPolicy CancellationPolicy?
+  hotelReservations  HotelReservation[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
@@ -240,44 +247,183 @@ enum CancellationPenaltyType {
 }
 
 model Guest {
-  id        String   @id @default(cuid())
-  tenantId  String
-  firstName String
-  lastName  String
-  email     String?
-  phone     String?
-  stays     Stay[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                     String                  @id @default(cuid())
+  tenantId               String
+  firstName              String
+  lastName               String
+  email                  String?
+  phone                  String?
+  stays                  Stay[]
+  hotelReservationGuests HotelReservationGuest[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   @@index([tenantId, phone])
   @@index([tenantId, email])
 }
 
+model HotelReservation {
+  id                    String                  @id @default(cuid())
+  tenantId              String
+  propertyId            String
+  roomTypeId            String
+  assignedRoomId        String?
+  ratePlanId            String?
+  confirmationCode      String
+  status                HotelReservationStatus  @default(confirmed)
+  source                HotelReservationSource  @default(walk_in)
+  arrivalDate           DateTime
+  departureDate         DateTime
+  adultCount            Int                     @default(1)
+  childCount            Int                     @default(0)
+  guestName             String
+  guestEmail            String?
+  guestPhone            String?
+  depositRequiredAmount Decimal                 @default(0)
+  depositPaidAmount     Decimal                 @default(0)
+  currency              String
+  rateOverride          Decimal?
+  notes                 String?
+  specialRequests       String?
+  createdByUserId       String
+  statusChangedByUserId String?
+  statusChangedAt       DateTime?
+  property              Property                @relation(fields: [propertyId], references: [id])
+  roomType              RoomType                @relation(fields: [roomTypeId], references: [id])
+  assignedRoom          Room?                   @relation(fields: [assignedRoomId], references: [id])
+  ratePlan              RatePlan?               @relation(fields: [ratePlanId], references: [id])
+  guests                HotelReservationGuest[]
+  guarantee             ReservationGuarantee?
+  stay                  Stay?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  @@unique([tenantId, confirmationCode])
+  @@index([tenantId, propertyId, arrivalDate, departureDate])
+  @@index([tenantId, propertyId, status])
+  @@index([tenantId, roomTypeId, arrivalDate])
+  @@index([tenantId, assignedRoomId, arrivalDate])
+}
+
+model HotelReservationGuest {
+  id            String           @id @default(cuid())
+  tenantId      String
+  propertyId    String
+  reservationId String
+  guestId       String?
+  firstName     String
+  lastName      String
+  email         String?
+  phone         String?
+  isPrimary     Boolean          @default(false)
+  reservation   HotelReservation @relation(fields: [reservationId], references: [id])
+  guest         Guest?           @relation(fields: [guestId], references: [id])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([tenantId, propertyId, reservationId])
+  @@index([tenantId, guestId])
+}
+
+model ReservationGuarantee {
+  id            String                     @id @default(cuid())
+  tenantId      String
+  propertyId    String
+  reservationId String                     @unique
+  method        String
+  provider      String?
+  providerToken String?
+  status        ReservationGuaranteeStatus @default(active)
+  reservation   HotelReservation           @relation(fields: [reservationId], references: [id])
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([tenantId, propertyId, status])
+}
+
+enum HotelReservationStatus {
+  draft
+  confirmed
+  guaranteed
+  checked_in
+  checked_out
+  cancelled
+  no_show
+}
+
+enum HotelReservationSource {
+  walk_in
+  phone
+  direct
+  ota
+  corporate
+}
+
+enum ReservationGuaranteeStatus {
+  active
+  released
+  charged
+  failed
+}
+
 model Stay {
-  id                 String        @id @default(cuid())
+  id                 String            @id @default(cuid())
   tenantId           String
   propertyId         String
   roomId             String
   guestId            String
-  status             String        @default("active")
-  checkInAt          DateTime      @default(now())
+  hotelReservationId String?           @unique
+  status             String            @default("active")
+  checkInAt          DateTime          @default(now())
   expectedCheckOutAt DateTime?
   checkOutAt         DateTime?
   checkedInByUserId  String
   checkedOutByUserId String?
   notes              String?
-  tenant             Tenant        @relation(fields: [tenantId], references: [id])
-  property           Property      @relation(fields: [propertyId], references: [id])
-  room               Room          @relation(fields: [roomId], references: [id])
-  guest              Guest         @relation(fields: [guestId], references: [id])
+  tenant             Tenant            @relation(fields: [tenantId], references: [id])
+  property           Property          @relation(fields: [propertyId], references: [id])
+  room               Room              @relation(fields: [roomId], references: [id])
+  guest              Guest             @relation(fields: [guestId], references: [id])
+  hotelReservation   HotelReservation? @relation(fields: [hotelReservationId], references: [id])
   folioCharges       FolioCharge[]
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  hotelAuditLogs      HotelAuditLog[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   @@index([tenantId, status])
   @@index([tenantId, roomId, status])
   @@index([tenantId, guestId, checkInAt])
+  @@index([tenantId, hotelReservationId])
+}
+
+model HotelAuditLog {
+  id            String          @id @default(cuid())
+  tenantId      String
+  propertyId    String
+  roomId        String?
+  stayId        String?
+  reservationId String?
+  event         HotelAuditEvent
+  actorId       String?
+  actorRole     String?
+  previousState Json?
+  newState      Json?
+  createdAt     DateTime        @default(now())
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  property      Property        @relation(fields: [propertyId], references: [id])
+  room          Room?           @relation(fields: [roomId], references: [id])
+  stay          Stay?           @relation(fields: [stayId], references: [id])
+
+  @@index([tenantId, propertyId, createdAt])
+  @@index([tenantId, roomId, createdAt])
+  @@index([tenantId, stayId, createdAt])
+  @@index([tenantId, reservationId, createdAt])
+}
+
+enum HotelAuditEvent {
+  room_status_changed
+  check_in_completed
+  check_out_completed
 }
 
 model FolioCharge {
