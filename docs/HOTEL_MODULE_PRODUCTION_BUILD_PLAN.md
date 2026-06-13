@@ -62,7 +62,7 @@ Goal: make the current hotel module safer without changing the product shape too
 - [x] Add idempotency keys for check-in and checkout endpoints.
 - [x] Add stronger checkout validation for active stay and room state.
 - [x] Prevent manual room status changes that conflict with active stays.
-- [ ] Add basic hotel smoke tests for property, rooms, check-in, restaurant room charge, and checkout.
+- [x] Add basic hotel smoke tests for property, rooms, check-in, restaurant room charge, and checkout.
 - [x] Add clear errors for unsupported currency and invalid checkout dates.
 
 Current endpoints to harden:
@@ -75,6 +75,13 @@ Current endpoints to harden:
 - `POST /properties/:propertyId/rooms/:roomId/check-out`
 - `GET /stays/active`
 - `POST /folios/:folioId/charges`
+
+Smoke test:
+
+- `pnpm smoke:hotel` runs an authenticated end-to-end API smoke test against local or staging.
+- Required env: `RAYAAN_SMOKE_TOKEN`.
+- Optional env: `RAYAAN_SMOKE_API_URL`, defaulting to `http://localhost:4000/api`.
+- The smoke creates isolated property, room, restaurant, menu item, order, room charge, and checkout records.
 
 ## Phase 1: Room Types and Rate Plans
 

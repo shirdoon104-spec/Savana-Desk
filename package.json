@@ -12,6 +12,7 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "verify": "pnpm typecheck && pnpm build",
+    "smoke:hotel": "node apps/api/scripts/hotel-smoke-test.mjs",
     "format": "prettier --write .",
     "db:generate": "pnpm --filter @rayaan/database db:generate",
     "db:migrate": "pnpm --filter @rayaan/database db:migrate",
