@@ -1967,6 +1967,12 @@ select:focus {
   font-size: 14px;
 }
 
+.room-action-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .check-in-form {
   border-top: 1px solid var(--line);
   display: grid;
@@ -2012,6 +2018,76 @@ select:focus {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.folio-detail-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.folio-summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.folio-summary-grid > div {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.folio-summary-grid span,
+.folio-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.folio-detail-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.folio-detail-grid h4 {
+  margin: 0 0 8px;
+}
+
+.folio-row-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  overflow: hidden;
+}
+
+.folio-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+
+.folio-row:last-child {
+  border-bottom: 0;
+}
+
+.folio-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.folio-row strong {
+  overflow-wrap: anywhere;
 }
 
 .inventory-form {

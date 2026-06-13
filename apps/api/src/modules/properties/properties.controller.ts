@@ -494,7 +494,7 @@ export class PropertiesController {
             roomType: true,
             stays: {
               where: { status: "active" },
-              include: { guest: true },
+              include: { guest: true, guestFolio: true },
               orderBy: { checkInAt: "desc" },
               take: 1,
             },
@@ -605,6 +605,15 @@ export class PropertiesController {
                   lastName: room.stays[0].guest.lastName,
                   phone: room.stays[0].guest.phone,
                 },
+                folio: room.stays[0].guestFolio
+                  ? {
+                      balance: room.stays[0].guestFolio.balance,
+                      currency: room.stays[0].guestFolio.currency,
+                      id: room.stays[0].guestFolio.id,
+                      status: room.stays[0].guestFolio.status,
+                    }
+                  : null,
+                folioId: room.stays[0].guestFolio?.id ?? room.stays[0].id,
                 id: room.stays[0].id,
                 notes: room.stays[0].notes,
               }

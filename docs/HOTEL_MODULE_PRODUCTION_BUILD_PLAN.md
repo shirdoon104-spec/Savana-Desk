@@ -221,7 +221,7 @@ Goal: introduce a real folio model while preserving current `Stay` behavior.
 - [x] Use `GuestFolio.id` as the new `folioId`.
 - [x] Keep support for old `Stay.id` folio references during migration.
 - [x] Add folio status: open, pending_checkout, closed, locked, void.
-- [ ] Add folio detail API and UI.
+- [x] Add folio detail API and UI.
 
 Status as of 2026-06-13: explicit folio foundation is implemented. `GuestFolio`,
 `FolioLineItem`, `FolioPayment`, and `FolioAdjustment` now exist with typed folio
@@ -231,6 +231,12 @@ copies legacy room charges into `FolioLineItem`. New check-ins create an open
 folio and checkout closes it. `GET /stays/active` now returns `GuestFolio.id`
 as `folioId` when present, while `POST /folios/:folioId/charges` still accepts
 old `Stay.id` folio references during the migration window.
+
+Status as of 2026-06-13: folio detail API and first UI view are implemented.
+`GET /folios/:folioId` returns folio status, balance, stay, guest, room, line
+items, payments, adjustments, and legacy charges. The property room cards can
+open the current stay's folio and show line items, payments, legacy room
+charges, and summary totals.
 
 Line item types:
 

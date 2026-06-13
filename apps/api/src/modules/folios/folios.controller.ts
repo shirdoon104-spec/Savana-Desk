@@ -325,6 +325,148 @@ export class FoliosController {
     }));
   }
 
+  @Get("folios/:folioId")
+  @RequirePermission("billing.read")
+  async getFolio(
+    @CurrentTenant() context: TenantContext,
+    @Param("folioId") folioId: string,
+  ): Promise<Record<string, unknown>> {
+    const folio =
+      (await this.prisma.guestFolio.findFirst({
+        where: {
+          id: folioId,
+          tenantId: context.tenant.id,
+        },
+        include: {
+          adjustments: {
+            orderBy: { createdAt: "asc" },
+          },
+          guest: true,
+          legacyCharges: {
+            orderBy: { createdAt: "asc" },
+          },
+          lineItems: {
+            orderBy: { createdAt: "asc" },
+          },
+          payments: {
+            orderBy: { createdAt: "asc" },
+          },
+          property: true,
+          stay: {
+            include: {
+              room: true,
+            },
+          },
+        },
+      })) ??
+      (await this.prisma.guestFolio.findFirst({
+        where: {
+          stayId: folioId,
+          tenantId: context.tenant.id,
+        },
+        include: {
+          adjustments: {
+            orderBy: { createdAt: "asc" },
+          },
+          guest: true,
+          legacyCharges: {
+            orderBy: { createdAt: "asc" },
+          },
+          lineItems: {
+            orderBy: { createdAt: "asc" },
+          },
+          payments: {
+            orderBy: { createdAt: "asc" },
+          },
+          property: true,
+          stay: {
+            include: {
+              room: true,
+            },
+          },
+        },
+      }));
+
+    if (!folio) {
+      throw new BadRequestException("Folio was not found for this tenant.");
+    }
+
+    const lineItemTotal = sumDecimals(
+      folio.lineItems
+        .filter((item) => !item.voidedAt)
+        .map((item) => item.amount),
+    );
+    const paymentTotal = sumDecimals(
+      folio.payments
+        .filter((payment) => payment.status === "confirmed")
+        .map((payment) => payment.amount),
+    );
+
+    return {
+      balance: folio.balance.toString(),
+      closedAt: folio.closedAt,
+      currency: folio.currency,
+      guest: {
+        email: folio.guest.email,
+        firstName: folio.guest.firstName,
+        id: folio.guest.id,
+        lastName: folio.guest.lastName,
+        phone: folio.guest.phone,
+      },
+      id: folio.id,
+      lineItemTotal: lineItemTotal.toString(),
+      lineItems: folio.lineItems.map((item) => ({
+        amount: item.amount.toString(),
+        createdAt: item.createdAt,
+        currency: item.currency,
+        description: item.description,
+        id: item.id,
+        sourceId: item.sourceId,
+        sourceType: item.sourceType,
+        type: item.type,
+        voidedAt: item.voidedAt,
+      })),
+      legacyCharges: folio.legacyCharges.map((charge) => ({
+        amount: charge.amount.toString(),
+        createdAt: charge.createdAt,
+        currency: charge.currency,
+        description: charge.description,
+        id: charge.id,
+        orderId: charge.orderId,
+        restaurantId: charge.restaurantId,
+      })),
+      openedAt: folio.openedAt,
+      paymentTotal: paymentTotal.toString(),
+      payments: folio.payments.map((payment) => ({
+        amount: payment.amount.toString(),
+        createdAt: payment.createdAt,
+        currency: payment.currency,
+        id: payment.id,
+        method: payment.method,
+        paidAt: payment.paidAt,
+        reference: payment.reference,
+        status: payment.status,
+      })),
+      property: {
+        id: folio.property.id,
+        name: folio.property.name,
+      },
+      room: {
+        id: folio.stay.room.id,
+        number: folio.stay.room.number,
+        status: folio.stay.room.status,
+      },
+      status: folio.status,
+      stay: {
+        checkInAt: folio.stay.checkInAt,
+        checkOutAt: folio.stay.checkOutAt,
+        expectedCheckOutAt: folio.stay.expectedCheckOutAt,
+        id: folio.stay.id,
+        status: folio.stay.status,
+      },
+    };
+  }
+
   @Post("folios/:folioId/charges")
   @RequirePermission("restaurant.read")
   async postCharge(

@@ -148,6 +148,13 @@ interface PropertyResponse {
       activeStay: {
         checkInAt: string;
         expectedCheckOutAt: string | null;
+        folio: {
+          balance: string | number;
+          currency: string;
+          id: string;
+          status: string;
+        } | null;
+        folioId: string;
         guest: {
           email: string | null;
           firstName: string;
@@ -197,6 +204,70 @@ interface RateLookupResponse {
   minNights: number;
   nights: number;
   totalAmount: string | number;
+}
+
+interface FolioDetailResponse {
+  balance: string | number;
+  closedAt: string | null;
+  currency: string;
+  guest: {
+    email: string | null;
+    firstName: string;
+    id: string;
+    lastName: string;
+    phone: string | null;
+  };
+  id: string;
+  lineItemTotal: string | number;
+  lineItems: Array<{
+    amount: string | number;
+    createdAt: string;
+    currency: string;
+    description: string;
+    id: string;
+    sourceId: string | null;
+    sourceType: string | null;
+    type: string;
+    voidedAt: string | null;
+  }>;
+  legacyCharges: Array<{
+    amount: string | number;
+    createdAt: string;
+    currency: string;
+    description: string;
+    id: string;
+    orderId: string | null;
+    restaurantId: string | null;
+  }>;
+  openedAt: string;
+  paymentTotal: string | number;
+  payments: Array<{
+    amount: string | number;
+    createdAt: string;
+    currency: string;
+    id: string;
+    method: string;
+    paidAt: string | null;
+    reference: string | null;
+    status: string;
+  }>;
+  property: {
+    id: string;
+    name: string;
+  };
+  room: {
+    id: string;
+    number: string;
+    status: string;
+  };
+  status: string;
+  stay: {
+    checkInAt: string;
+    checkOutAt: string | null;
+    expectedCheckOutAt: string | null;
+    id: string;
+    status: string;
+  };
 }
 
 const roomStatuses = [
@@ -331,6 +402,10 @@ export default function PropertiesPage() {
     message: string;
     roomId: string;
   } | null>(null);
+  const [selectedFolio, setSelectedFolio] =
+    useState<FolioDetailResponse | null>(null);
+  const [selectedFolioId, setSelectedFolioId] = useState("");
+  const [folioLoadState, setFolioLoadState] = useState<LoadState>("idle");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const earliestExpectedCheckOutDate = useMemo(
     () => dateInputDaysFromNow(1),
@@ -1128,6 +1203,38 @@ export default function PropertiesPage() {
     setCheckoutReview(null);
     setIsSubmitting(false);
     await loadProperties();
+    if (selectedFolioId) {
+      await loadFolio(selectedFolioId);
+    }
+  }
+
+  async function loadFolio(folioId: string) {
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setError("Choose a workspace before viewing a folio.");
+      return;
+    }
+
+    setSelectedFolioId(folioId);
+    setFolioLoadState("loading");
+    setError(null);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/folios/${folioId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (!response.ok) {
+      setFolioLoadState("error");
+      setError(await readApiMessage(response, "Could not load folio."));
+      return;
+    }
+
+    setSelectedFolio((await response.json()) as FolioDetailResponse);
+    setFolioLoadState("ready");
   }
 
   return (
@@ -1418,6 +1525,16 @@ export default function PropertiesPage() {
                                 room.activeStay.checkInAt,
                               ).toLocaleDateString()}
                             </span>
+                            {room.activeStay.folio ? (
+                              <span>
+                                Folio{" "}
+                                {formatLabel(room.activeStay.folio.status)}:{" "}
+                                {formatMoney(
+                                  room.activeStay.folio.balance,
+                                  room.activeStay.folio.currency,
+                                )}
+                              </span>
+                            ) : null}
                           </div>
                         ) : null}
                         {data?.allowedRoomStatuses.length ? (
@@ -1441,14 +1558,26 @@ export default function PropertiesPage() {
                           <small>{formatLabel(room.status)}</small>
                         )}
                         {data?.canManageStays && room.activeStay ? (
-                          <button
-                            className="secondary-button"
-                            disabled={isSubmitting}
-                            onClick={() => checkOutGuest(room.id)}
-                            type="button"
-                          >
-                            Check out
-                          </button>
+                          <div className="room-action-row">
+                            <button
+                              className="secondary-button"
+                              disabled={folioLoadState === "loading"}
+                              onClick={() =>
+                                loadFolio(room.activeStay?.folioId ?? "")
+                              }
+                              type="button"
+                            >
+                              View folio
+                            </button>
+                            <button
+                              className="secondary-button"
+                              disabled={isSubmitting}
+                              onClick={() => checkOutGuest(room.id)}
+                              type="button"
+                            >
+                              Check out
+                            </button>
+                          </div>
                         ) : null}
                         {checkoutReview?.roomId === room.id ? (
                           <div className="checkout-review">
@@ -1558,6 +1687,133 @@ export default function PropertiesPage() {
                       </div>
                     ))}
                   </div>
+
+                  {selectedFolio ? (
+                    <section className="folio-detail-panel">
+                      <div className="section-heading">
+                        <div>
+                          <p className="eyebrow">Folio</p>
+                          <h3>
+                            Room {selectedFolio.room.number} -{" "}
+                            {selectedFolio.guest.firstName}{" "}
+                            {selectedFolio.guest.lastName}
+                          </h3>
+                        </div>
+                        <button
+                          className="secondary-button"
+                          onClick={() => {
+                            setSelectedFolio(null);
+                            setSelectedFolioId("");
+                            setFolioLoadState("idle");
+                          }}
+                          type="button"
+                        >
+                          Close
+                        </button>
+                      </div>
+                      <div className="folio-summary-grid">
+                        <div>
+                          <span>Status</span>
+                          <strong>{formatLabel(selectedFolio.status)}</strong>
+                        </div>
+                        <div>
+                          <span>Balance</span>
+                          <strong>
+                            {formatMoney(
+                              selectedFolio.balance,
+                              selectedFolio.currency,
+                            )}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Line items</span>
+                          <strong>
+                            {formatMoney(
+                              selectedFolio.lineItemTotal,
+                              selectedFolio.currency,
+                            )}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Payments</span>
+                          <strong>
+                            {formatMoney(
+                              selectedFolio.paymentTotal,
+                              selectedFolio.currency,
+                            )}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="folio-detail-grid">
+                        <div>
+                          <h4>Line items</h4>
+                          <div className="folio-row-list">
+                            {selectedFolio.lineItems.map((item) => (
+                              <div className="folio-row" key={item.id}>
+                                <div>
+                                  <strong>{item.description}</strong>
+                                  <span>
+                                    {formatLabel(item.type)}
+                                    {item.sourceType
+                                      ? ` - ${formatLabel(item.sourceType)}`
+                                      : ""}
+                                  </span>
+                                </div>
+                                <strong>
+                                  {formatMoney(item.amount, item.currency)}
+                                </strong>
+                              </div>
+                            ))}
+                            {!selectedFolio.lineItems.length ? (
+                              <div className="empty-state">
+                                No folio line items yet.
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4>Payments and legacy charges</h4>
+                          <div className="folio-row-list">
+                            {selectedFolio.payments.map((payment) => (
+                              <div className="folio-row" key={payment.id}>
+                                <div>
+                                  <strong>{formatLabel(payment.method)}</strong>
+                                  <span>{formatLabel(payment.status)}</span>
+                                </div>
+                                <strong>
+                                  {formatMoney(
+                                    payment.amount,
+                                    payment.currency,
+                                  )}
+                                </strong>
+                              </div>
+                            ))}
+                            {selectedFolio.legacyCharges.map((charge) => (
+                              <div className="folio-row" key={charge.id}>
+                                <div>
+                                  <strong>{charge.description}</strong>
+                                  <span>Legacy room charge</span>
+                                </div>
+                                <strong>
+                                  {formatMoney(charge.amount, charge.currency)}
+                                </strong>
+                              </div>
+                            ))}
+                            {!selectedFolio.payments.length &&
+                            !selectedFolio.legacyCharges.length ? (
+                              <div className="empty-state">
+                                No payments or legacy charges yet.
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : folioLoadState === "loading" ? (
+                    <div className="empty-state">Loading folio...</div>
+                  ) : null}
 
                   {!selectedProperty.rooms.length ? (
                     <div className="empty-state">No rooms added yet.</div>
