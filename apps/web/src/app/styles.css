@@ -2342,6 +2342,17 @@ select:focus {
   gap: 5px;
 }
 
+.reservation-booking-form .checkbox-label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.reservation-booking-form .checkbox-label input {
+  height: 18px;
+  width: 18px;
+}
+
 .reservation-arrival-list {
   border: 1px solid var(--line);
   border-radius: var(--radius);

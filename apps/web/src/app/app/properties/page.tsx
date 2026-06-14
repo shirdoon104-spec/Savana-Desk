@@ -90,6 +90,7 @@ interface PropertyResponse {
       } | null;
       assignedRoomId: string | null;
       childCount: number;
+      complimentaryReason: string | null;
       confirmationCode: string;
       currency: string;
       departureDate: string;
@@ -99,6 +100,7 @@ interface PropertyResponse {
       guestName: string;
       guestPhone: string | null;
       id: string;
+      isComplimentary: boolean;
       notes: string | null;
       rateOverride: string | number | null;
       ratePlanId: string | null;
@@ -402,6 +404,10 @@ export default function PropertiesPage() {
   const [reservationDepositRequired, setReservationDepositRequired] =
     useState("");
   const [reservationRateOverride, setReservationRateOverride] = useState("");
+  const [reservationIsComplimentary, setReservationIsComplimentary] =
+    useState(false);
+  const [reservationComplimentaryReason, setReservationComplimentaryReason] =
+    useState("");
   const [reservationNotes, setReservationNotes] = useState("");
   const [roomPrefix, setRoomPrefix] = useState("");
   const [roomFrom, setRoomFrom] = useState("");
@@ -1032,14 +1038,24 @@ export default function PropertiesPage() {
           arrivalDate: reservationArrivalDate,
           assignedRoomId: reservationAssignedRoomId || undefined,
           childCount: Number(reservationChildCount),
+          complimentaryReason:
+            data?.canManageProperties && reservationIsComplimentary
+              ? reservationComplimentaryReason || undefined
+              : undefined,
           departureDate: reservationDepartureDate,
           depositRequiredAmount: reservationDepositRequired || undefined,
           guestEmail: reservationGuestEmail || undefined,
           guestName: reservationGuestName,
           guestPhone: reservationGuestPhone || undefined,
+          isComplimentary:
+            data?.canManageProperties && reservationIsComplimentary
+              ? true
+              : undefined,
           notes: reservationNotes || undefined,
           rateOverride:
-            data?.canManageProperties && reservationRateOverride
+            data?.canManageProperties &&
+            !reservationIsComplimentary &&
+            reservationRateOverride
               ? reservationRateOverride
               : undefined,
           ratePlanId: reservationRatePlanId || undefined,
@@ -1069,6 +1085,8 @@ export default function PropertiesPage() {
     setReservationAssignedRoomId("");
     setReservationDepositRequired("");
     setReservationRateOverride("");
+    setReservationIsComplimentary(false);
+    setReservationComplimentaryReason("");
     setReservationNotes("");
     await loadProperties();
   }
@@ -2096,17 +2114,48 @@ export default function PropertiesPage() {
                         </label>
                       </div>
                       {data?.canManageProperties ? (
-                        <label>
-                          Rate override
-                          <input
-                            inputMode="decimal"
-                            onChange={(event) =>
-                              setReservationRateOverride(event.target.value)
-                            }
-                            placeholder={selectedProperty.currency}
-                            value={reservationRateOverride}
-                          />
-                        </label>
+                        <>
+                          <label className="checkbox-label">
+                            <input
+                              checked={reservationIsComplimentary}
+                              onChange={(event) => {
+                                setReservationIsComplimentary(
+                                  event.target.checked,
+                                );
+                                if (event.target.checked) {
+                                  setReservationRateOverride("");
+                                }
+                              }}
+                              type="checkbox"
+                            />
+                            Complimentary stay
+                          </label>
+                          {reservationIsComplimentary ? (
+                            <label>
+                              Complimentary reason
+                              <input
+                                onChange={(event) =>
+                                  setReservationComplimentaryReason(
+                                    event.target.value,
+                                  )
+                                }
+                                value={reservationComplimentaryReason}
+                              />
+                            </label>
+                          ) : (
+                            <label>
+                              Rate override
+                              <input
+                                inputMode="decimal"
+                                onChange={(event) =>
+                                  setReservationRateOverride(event.target.value)
+                                }
+                                placeholder={selectedProperty.currency}
+                                value={reservationRateOverride}
+                              />
+                            </label>
+                          )}
+                        </>
                       ) : null}
                       <label>
                         Notes
@@ -2150,15 +2199,21 @@ export default function PropertiesPage() {
                           <div>
                             <span>{formatLabel(reservation.source)}</span>
                             <small>
-                              {reservation.rateOverride
-                                ? `Override ${formatMoney(
-                                    reservation.rateOverride,
-                                    reservation.currency,
-                                  )}`
-                                : `Deposit ${formatMoney(
-                                    reservation.depositRequiredAmount,
-                                    reservation.currency,
-                                  )}`}
+                              {reservation.isComplimentary
+                                ? `Complimentary${
+                                    reservation.complimentaryReason
+                                      ? ` - ${reservation.complimentaryReason}`
+                                      : ""
+                                  }`
+                                : reservation.rateOverride
+                                  ? `Override ${formatMoney(
+                                      reservation.rateOverride,
+                                      reservation.currency,
+                                    )}`
+                                  : `Deposit ${formatMoney(
+                                      reservation.depositRequiredAmount,
+                                      reservation.currency,
+                                    )}`}
                             </small>
                           </div>
                           <select

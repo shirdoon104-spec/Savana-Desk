@@ -294,6 +294,8 @@ model HotelReservation {
   depositPaidAmount     Decimal                 @default(0)
   currency              String
   rateOverride          Decimal?
+  isComplimentary       Boolean                 @default(false)
+  complimentaryReason   String?
   notes                 String?
   specialRequests       String?
   createdByUserId       String

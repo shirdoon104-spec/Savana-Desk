@@ -286,7 +286,7 @@ Goal: post nightly room charges from reservations/stays instead of relying only 
 - [x] Document that later night audit will replace upfront posting.
 - [x] Add taxes and service charges from configurable property/rate settings.
 - [x] Support rate override with permission.
-- [ ] Support complimentary stays.
+- [x] Support complimentary stays.
 - [ ] Support late checkout and extra-night charges.
 - [ ] Add early check-in and late checkout fee configuration.
 - [ ] Support manual re-post/recalculate for open folios only.
@@ -308,6 +308,11 @@ Users with `property.manage` can enter a one-off nightly override while creating
 a reservation. The API rejects override attempts from users without that
 permission, and check-in uses the saved override when posting room-night folio
 line items.
+
+Status as of 2026-06-14: complimentary reservations are supported for property
+managers. A complimentary reservation stores an optional reason, cannot also use
+a rate override, and check-in opens the guest folio without posting automatic
+room-night, service-charge, or tax line items.
 
 Posting rule:
 

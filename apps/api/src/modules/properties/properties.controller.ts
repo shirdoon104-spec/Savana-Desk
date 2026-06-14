@@ -389,6 +389,15 @@ class CreateHotelReservationDto {
   childCount?: number;
 
   @IsOptional()
+  @IsBoolean()
+  isComplimentary?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  complimentaryReason?: string;
+
+  @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
   depositRequiredAmount?: string;
@@ -559,6 +568,7 @@ export class PropertiesController {
             : null,
           assignedRoomId: reservation.assignedRoomId,
           childCount: reservation.childCount,
+          complimentaryReason: reservation.complimentaryReason,
           confirmationCode: reservation.confirmationCode,
           currency: reservation.currency,
           departureDate: reservation.departureDate,
@@ -570,6 +580,7 @@ export class PropertiesController {
           guarantee: reservation.guarantee,
           guests: reservation.guests,
           id: reservation.id,
+          isComplimentary: reservation.isComplimentary,
           notes: reservation.notes,
           rateOverride: reservation.rateOverride,
           ratePlanId: reservation.ratePlanId,
@@ -1142,6 +1153,23 @@ export class PropertiesController {
       );
     }
 
+    const isComplimentary = body.isComplimentary ?? false;
+
+    if (
+      isComplimentary &&
+      !hasTenantPermission(context.role, "property.manage")
+    ) {
+      throw new BadRequestException(
+        "Only property managers can mark reservations as complimentary.",
+      );
+    }
+
+    if (isComplimentary && rateOverride) {
+      throw new BadRequestException(
+        "Complimentary reservations cannot also use a rate override.",
+      );
+    }
+
     const [firstName, ...lastNameParts] = body.guestName.trim().split(/\s+/);
     const lastName = lastNameParts.join(" ") || "Guest";
 
@@ -1163,6 +1191,7 @@ export class PropertiesController {
         guestEmail: body.guestEmail?.trim().toLowerCase() || null,
         guestName: body.guestName.trim(),
         guestPhone: body.guestPhone?.trim() || null,
+        isComplimentary,
         guests: {
           create: {
             email: body.guestEmail?.trim().toLowerCase() || null,
@@ -1176,6 +1205,9 @@ export class PropertiesController {
         },
         notes: body.notes?.trim() || null,
         propertyId: property.id,
+        complimentaryReason: isComplimentary
+          ? body.complimentaryReason?.trim() || null
+          : null,
         rateOverride,
         ratePlanId: body.ratePlanId?.trim() || null,
         roomTypeId: roomType.id,
@@ -1366,8 +1398,9 @@ export class PropertiesController {
       );
     }
 
+    const isComplimentaryStay = reservation?.isComplimentary ?? false;
     const roomNightQuote =
-      expectedCheckOutAt && room.roomTypeId
+      expectedCheckOutAt && room.roomTypeId && !isComplimentaryStay
         ? await this.tryBuildRoomNightQuote({
             arrivalDate: checkedInAt,
             departureDate: expectedCheckOutAt,
@@ -1487,6 +1520,7 @@ export class PropertiesController {
           newState: {
             expectedCheckOutAt,
             folioId: guestFolio.id,
+            isComplimentary: isComplimentaryStay,
             roomChargeTotal:
               roomChargeLineItems.length > 0
                 ? roomChargeTotal.toString()
