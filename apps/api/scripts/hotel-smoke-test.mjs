@@ -98,7 +98,18 @@ const room = roomPayload.rooms?.find((candidate) =>
   String(candidate.number).startsWith(`SMK${runId}-`),
 );
 assert(room?.id, "Room creation did not return the smoke room.");
+assert(room.roomTypeId, "Room creation did not return a room type id.");
 printStep(`created room ${room.number}`);
+
+await api(`/properties/${property.id}/room-types`, {
+  body: JSON.stringify({
+    code: "smoke-standard",
+    defaultRate: "99.00",
+    name: "Smoke Standard",
+  }),
+  method: "POST",
+});
+printStep("configured room type default rate");
 
 const stay = await api(`/properties/${property.id}/rooms/${room.id}/check-in`, {
   body: JSON.stringify({
@@ -115,6 +126,25 @@ const stay = await api(`/properties/${property.id}/rooms/${room.id}/check-in`, {
 });
 assert(stay.id, "Check-in response did not include a stay id.");
 printStep(`checked in stay ${stay.id}`);
+
+const activeStays = await api(
+  `/stays/active?search=${encodeURIComponent(room.number)}`,
+);
+const activeStay = activeStays.find(
+  (candidate) => candidate.stayId === stay.id,
+);
+assert(activeStay?.folioId, "Active stay search did not return a folio id.");
+
+const folioAfterCheckIn = await api(`/folios/${activeStay.folioId}`);
+assert(
+  folioAfterCheckIn.lineItems.some((item) => item.type === "room_night"),
+  "Check-in did not create a room-night folio line item.",
+);
+assert(
+  Number(folioAfterCheckIn.balance) >= 99,
+  "Folio balance did not include the room-night charge.",
+);
+printStep(`created room-night folio line on ${activeStay.folioId}`);
 
 const restaurant = await api("/restaurants", {
   body: JSON.stringify({

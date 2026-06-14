@@ -1305,6 +1305,22 @@ export class PropertiesController {
       );
     }
 
+    const roomNightQuote =
+      expectedCheckOutAt && room.roomTypeId
+        ? await this.tryBuildRoomNightQuote({
+            arrivalDate: checkedInAt,
+            departureDate: expectedCheckOutAt,
+            guestCount: reservation
+              ? reservation.adultCount + reservation.childCount
+              : 1,
+            propertyId,
+            ratePlanId: reservation?.ratePlanId ?? undefined,
+            reservationRateOverride: reservation?.rateOverride ?? undefined,
+            roomTypeId: room.roomTypeId,
+            tenantId: context.tenant.id,
+          })
+        : null;
+
     const stay = await this.prisma.$transaction(async (tx) => {
       const guest = await tx.guest.create({
         data: {
@@ -1349,6 +1365,42 @@ export class PropertiesController {
         },
       });
 
+      if (roomNightQuote) {
+        await tx.folioLineItem.createMany({
+          data: roomNightQuote.nightlyRates.map((rate) => {
+            const extraGuestCount = Math.max(
+              roomNightQuote.guestCount - rate.baseOccupancy,
+              0,
+            );
+            const extraGuestAmount = rate.extraGuestRate.mul(extraGuestCount);
+            const amount = rate.baseRate.plus(extraGuestAmount);
+
+            return {
+              amount,
+              currency: rate.currency,
+              description: `Room night ${room.number} - ${rate.date
+                .toISOString()
+                .slice(0, 10)}`,
+              folioId: guestFolio.id,
+              postedById: context.tenantUser.clerkUserId,
+              propertyId,
+              sourceId: createdStay.id,
+              sourceType: "stay",
+              tenantId: context.tenant.id,
+              type: "room_night",
+              unitAmount: amount,
+            };
+          }),
+        });
+
+        await tx.guestFolio.update({
+          where: { id: guestFolio.id },
+          data: {
+            balance: { increment: roomNightQuote.totalAmount },
+          },
+        });
+      }
+
       await tx.room.update({
         where: { id: room.id },
         data: { status: "occupied" },
@@ -1383,6 +1435,9 @@ export class PropertiesController {
           newState: {
             expectedCheckOutAt,
             folioId: guestFolio.id,
+            roomNightChargeTotal:
+              roomNightQuote?.totalAmount.toString() ?? null,
+            roomNightCount: roomNightQuote?.nights ?? 0,
             guestId: guest.id,
             hotelReservationId: reservation?.id ?? null,
             roomId,
@@ -1897,6 +1952,36 @@ export class PropertiesController {
     }
 
     return new Date(trimmedValue);
+  }
+
+  private async tryBuildRoomNightQuote(input: {
+    arrivalDate: Date;
+    departureDate: Date;
+    guestCount: number;
+    propertyId: string;
+    ratePlanId?: string;
+    reservationRateOverride?: Prisma.Decimal.Value;
+    roomTypeId: string;
+    tenantId: string;
+  }) {
+    try {
+      return await this.rateLookup.lookup(input);
+    } catch (error) {
+      const response =
+        error instanceof BadRequestException ? error.getResponse() : null;
+      const message =
+        typeof response === "object" && response && "message" in response
+          ? String((response as { message?: unknown }).message)
+          : error instanceof Error
+            ? error.message
+            : "";
+
+      if (message.includes("No active room rate is configured")) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   private optionalNonNegativeInteger(value: number | string | undefined) {

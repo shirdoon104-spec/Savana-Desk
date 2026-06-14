@@ -281,9 +281,9 @@ Folio statuses:
 
 Goal: post nightly room charges from reservations/stays instead of relying only on manual charges.
 
-- [ ] Calculate nightly charge from assigned room/rate plan.
-- [ ] For MVP, create room-night folio line items at check-in for the reserved stay dates.
-- [ ] Document that later night audit will replace upfront posting.
+- [x] Calculate nightly charge from assigned room/rate plan.
+- [x] For MVP, create room-night folio line items at check-in for the reserved stay dates.
+- [x] Document that later night audit will replace upfront posting.
 - [ ] Add taxes and service charges from configurable property/rate settings.
 - [ ] Support rate override with permission.
 - [ ] Support complimentary stays.
@@ -291,6 +291,14 @@ Goal: post nightly room charges from reservations/stays instead of relying only 
 - [ ] Add early check-in and late checkout fee configuration.
 - [ ] Support manual re-post/recalculate for open folios only.
 - [ ] Add nightly audit job later.
+
+Status as of 2026-06-14: MVP room-night posting is implemented at check-in.
+When a room has a configured room type/rate plan/date rate, the server uses
+`HotelRateLookupService` to create append-only `FolioLineItem(type =
+"room_night")` records and increments the `GuestFolio` balance. Missing rate
+configuration does not block check-in yet; it simply leaves the folio without
+automatic room-night lines so existing front-desk workflows keep working. A
+future night audit can replace this upfront posting model.
 
 Posting rule:
 
