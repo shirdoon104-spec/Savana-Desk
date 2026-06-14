@@ -103,6 +103,30 @@ class CreatePropertyDto {
 class UpdatePropertySettingsDto {
   @IsOptional()
   @IsString()
+  earlyCheckInBeforeTime?: string;
+
+  @IsOptional()
+  @IsIn(["none", "fixed", "percent"])
+  earlyCheckInFeeType?: string;
+
+  @IsOptional()
+  @IsString()
+  earlyCheckInFeeValue?: string;
+
+  @IsOptional()
+  @IsString()
+  lateCheckoutAfterTime?: string;
+
+  @IsOptional()
+  @IsIn(["none", "fixed", "percent"])
+  lateCheckoutFeeType?: string;
+
+  @IsOptional()
+  @IsString()
+  lateCheckoutFeeValue?: string;
+
+  @IsOptional()
+  @IsString()
   serviceChargeRate?: string;
 
   @IsOptional()
@@ -552,7 +576,13 @@ export class PropertiesController {
       properties: properties.map((property) => ({
         city: property.city,
         currency: property.currency,
+        earlyCheckInBeforeTime: property.earlyCheckInBeforeTime,
+        earlyCheckInFeeType: property.earlyCheckInFeeType,
+        earlyCheckInFeeValue: property.earlyCheckInFeeValue,
         id: property.id,
+        lateCheckoutAfterTime: property.lateCheckoutAfterTime,
+        lateCheckoutFeeType: property.lateCheckoutFeeType,
+        lateCheckoutFeeValue: property.lateCheckoutFeeValue,
         name: property.name,
         serviceChargeRate: property.serviceChargeRate,
         taxRate: property.taxRate,
@@ -914,6 +944,26 @@ export class PropertiesController {
     return this.prisma.property.update({
       where: { id: property.id },
       data: {
+        earlyCheckInBeforeTime: this.optionalClockTime(
+          body.earlyCheckInBeforeTime,
+          "Early check-in time",
+        ),
+        earlyCheckInFeeType: this.optionalFeeType(body.earlyCheckInFeeType),
+        earlyCheckInFeeValue:
+          this.optionalDecimal(
+            body.earlyCheckInFeeValue,
+            "Early check-in fee",
+          ) ?? new Prisma.Decimal(0),
+        lateCheckoutAfterTime: this.optionalClockTime(
+          body.lateCheckoutAfterTime,
+          "Late checkout time",
+        ),
+        lateCheckoutFeeType: this.optionalFeeType(body.lateCheckoutFeeType),
+        lateCheckoutFeeValue:
+          this.optionalDecimal(
+            body.lateCheckoutFeeValue,
+            "Late checkout fee",
+          ) ?? new Prisma.Decimal(0),
         serviceChargeRate:
           this.optionalPercentRate(
             body.serviceChargeRate,
@@ -2066,6 +2116,28 @@ export class PropertiesController {
     }
 
     return this.requiredDecimal(value, label);
+  }
+
+  private optionalClockTime(value: string | undefined, label: string) {
+    if (value === undefined || value === null || value.trim() === "") {
+      return null;
+    }
+
+    const trimmedValue = value.trim();
+
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmedValue)) {
+      throw new BadRequestException(`${label} must use HH:mm format.`);
+    }
+
+    return trimmedValue;
+  }
+
+  private optionalFeeType(value: string | undefined) {
+    if (!value) {
+      return "none";
+    }
+
+    return value;
   }
 
   private optionalPercentRate(

@@ -72,7 +72,13 @@ interface PropertyResponse {
   properties: Array<{
     city: string | null;
     currency: string;
+    earlyCheckInBeforeTime: string | null;
+    earlyCheckInFeeType: string;
+    earlyCheckInFeeValue: string | number;
     id: string;
+    lateCheckoutAfterTime: string | null;
+    lateCheckoutFeeType: string;
+    lateCheckoutFeeValue: string | number;
     name: string;
     serviceChargeRate: string | number | null;
     taxRate: string | number | null;
@@ -366,6 +372,12 @@ export default function PropertiesPage() {
   const [propertyTaxRate, setPropertyTaxRate] = useState("0");
   const [propertyServiceChargeRate, setPropertyServiceChargeRate] =
     useState("0");
+  const [earlyCheckInBeforeTime, setEarlyCheckInBeforeTime] = useState("");
+  const [earlyCheckInFeeType, setEarlyCheckInFeeType] = useState("none");
+  const [earlyCheckInFeeValue, setEarlyCheckInFeeValue] = useState("0");
+  const [lateCheckoutAfterTime, setLateCheckoutAfterTime] = useState("");
+  const [lateCheckoutFeeType, setLateCheckoutFeeType] = useState("none");
+  const [lateCheckoutFeeValue, setLateCheckoutFeeValue] = useState("0");
   const [roomType, setRoomType] = useState("standard");
   const [roomTypeName, setRoomTypeName] = useState("");
   const [roomTypeCode, setRoomTypeCode] = useState("");
@@ -450,8 +462,24 @@ export default function PropertiesPage() {
     setPropertyServiceChargeRate(
       formatRatePercent(selectedProperty?.serviceChargeRate),
     );
+    setEarlyCheckInBeforeTime(selectedProperty?.earlyCheckInBeforeTime ?? "");
+    setEarlyCheckInFeeType(selectedProperty?.earlyCheckInFeeType ?? "none");
+    setEarlyCheckInFeeValue(
+      String(selectedProperty?.earlyCheckInFeeValue ?? 0),
+    );
+    setLateCheckoutAfterTime(selectedProperty?.lateCheckoutAfterTime ?? "");
+    setLateCheckoutFeeType(selectedProperty?.lateCheckoutFeeType ?? "none");
+    setLateCheckoutFeeValue(
+      String(selectedProperty?.lateCheckoutFeeValue ?? 0),
+    );
   }, [
+    selectedProperty?.earlyCheckInBeforeTime,
+    selectedProperty?.earlyCheckInFeeType,
+    selectedProperty?.earlyCheckInFeeValue,
     selectedProperty?.id,
+    selectedProperty?.lateCheckoutAfterTime,
+    selectedProperty?.lateCheckoutFeeType,
+    selectedProperty?.lateCheckoutFeeValue,
     selectedProperty?.serviceChargeRate,
     selectedProperty?.taxRate,
   ]);
@@ -764,6 +792,12 @@ export default function PropertiesPage() {
       `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/settings`,
       {
         body: JSON.stringify({
+          earlyCheckInBeforeTime: earlyCheckInBeforeTime || undefined,
+          earlyCheckInFeeType,
+          earlyCheckInFeeValue,
+          lateCheckoutAfterTime: lateCheckoutAfterTime || undefined,
+          lateCheckoutFeeType,
+          lateCheckoutFeeValue,
           serviceChargeRate: propertyServiceChargeRate,
           taxRate: propertyTaxRate,
         }),
@@ -2317,6 +2351,78 @@ export default function PropertiesPage() {
                           step="0.01"
                           type="number"
                           value={propertyTaxRate}
+                        />
+                      </label>
+                      <label>
+                        Early check-in before
+                        <input
+                          onChange={(event) =>
+                            setEarlyCheckInBeforeTime(event.target.value)
+                          }
+                          type="time"
+                          value={earlyCheckInBeforeTime}
+                        />
+                      </label>
+                      <label>
+                        Early fee type
+                        <select
+                          onChange={(event) =>
+                            setEarlyCheckInFeeType(event.target.value)
+                          }
+                          value={earlyCheckInFeeType}
+                        >
+                          <option value="none">None</option>
+                          <option value="fixed">Fixed</option>
+                          <option value="percent">Percent</option>
+                        </select>
+                      </label>
+                      <label>
+                        Early fee value
+                        <input
+                          inputMode="decimal"
+                          min="0"
+                          onChange={(event) =>
+                            setEarlyCheckInFeeValue(event.target.value)
+                          }
+                          step="0.01"
+                          type="number"
+                          value={earlyCheckInFeeValue}
+                        />
+                      </label>
+                      <label>
+                        Late checkout after
+                        <input
+                          onChange={(event) =>
+                            setLateCheckoutAfterTime(event.target.value)
+                          }
+                          type="time"
+                          value={lateCheckoutAfterTime}
+                        />
+                      </label>
+                      <label>
+                        Late fee type
+                        <select
+                          onChange={(event) =>
+                            setLateCheckoutFeeType(event.target.value)
+                          }
+                          value={lateCheckoutFeeType}
+                        >
+                          <option value="none">None</option>
+                          <option value="fixed">Fixed</option>
+                          <option value="percent">Percent</option>
+                        </select>
+                      </label>
+                      <label>
+                        Late fee value
+                        <input
+                          inputMode="decimal"
+                          min="0"
+                          onChange={(event) =>
+                            setLateCheckoutFeeValue(event.target.value)
+                          }
+                          step="0.01"
+                          type="number"
+                          value={lateCheckoutFeeValue}
                         />
                       </label>
                       <button disabled={isSubmitting} type="submit">

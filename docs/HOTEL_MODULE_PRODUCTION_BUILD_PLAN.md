@@ -288,7 +288,7 @@ Goal: post nightly room charges from reservations/stays instead of relying only 
 - [x] Support rate override with permission.
 - [x] Support complimentary stays.
 - [x] Support late checkout and extra-night charges.
-- [ ] Add early check-in and late checkout fee configuration.
+- [x] Add early check-in and late checkout fee configuration.
 - [ ] Support manual re-post/recalculate for open folios only.
 - [ ] Add nightly audit job later.
 
@@ -319,6 +319,11 @@ hotel checkout date is later than the stay's expected checkout date. The server
 requires checkout acknowledgement before posting those extra room-night,
 service-charge, and tax folio lines. Same-day hourly late checkout fees remain
 part of the later fee-configuration task.
+
+Status as of 2026-06-14: property-level early check-in and late checkout fee
+configuration is stored and editable from the property Setup tab. The
+configuration captures threshold times, fee type (`none`, `fixed`, `percent`),
+and fee value for each rule.
 
 Posting rule:
 

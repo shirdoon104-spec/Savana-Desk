@@ -71,6 +71,12 @@ model Property {
   currency          String             @default("USD")
   taxRate           Decimal?
   serviceChargeRate Decimal?
+  earlyCheckInBeforeTime String?
+  earlyCheckInFeeType    String             @default("none")
+  earlyCheckInFeeValue   Decimal            @default(0)
+  lateCheckoutAfterTime  String?
+  lateCheckoutFeeType    String             @default("none")
+  lateCheckoutFeeValue   Decimal            @default(0)
   tenant            Tenant             @relation(fields: [tenantId], references: [id])
   rooms             Room[]
   roomTypes         RoomType[]
