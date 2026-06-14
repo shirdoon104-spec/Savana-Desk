@@ -74,6 +74,8 @@ interface PropertyResponse {
     currency: string;
     id: string;
     name: string;
+    serviceChargeRate: string | number | null;
+    taxRate: string | number | null;
     restaurants: Array<{
       id: string;
       name: string;
@@ -296,6 +298,20 @@ function formatMoney(value: string | number | null | undefined, currency = "") {
   return `${currency ? `${currency} ` : ""}${amount.toFixed(2)}`;
 }
 
+function formatRatePercent(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return "0";
+  }
+
+  const rate = Number(value);
+
+  if (!Number.isFinite(rate)) {
+    return "0";
+  }
+
+  return (rate * 100).toFixed(2).replace(/\.?0+$/, "");
+}
+
 function statusOptionsForRoom(
   currentStatus: string,
   allowedStatuses: string[],
@@ -345,6 +361,9 @@ export default function PropertiesPage() {
   const [propertyName, setPropertyName] = useState("");
   const [city, setCity] = useState("Mogadishu");
   const [currency, setCurrency] = useState("USD");
+  const [propertyTaxRate, setPropertyTaxRate] = useState("0");
+  const [propertyServiceChargeRate, setPropertyServiceChargeRate] =
+    useState("0");
   const [roomType, setRoomType] = useState("standard");
   const [roomTypeName, setRoomTypeName] = useState("");
   const [roomTypeCode, setRoomTypeCode] = useState("");
@@ -418,6 +437,17 @@ export default function PropertiesPage() {
       data?.properties[0],
     [data?.properties, selectedPropertyId],
   );
+
+  useEffect(() => {
+    setPropertyTaxRate(formatRatePercent(selectedProperty?.taxRate));
+    setPropertyServiceChargeRate(
+      formatRatePercent(selectedProperty?.serviceChargeRate),
+    );
+  }, [
+    selectedProperty?.id,
+    selectedProperty?.serviceChargeRate,
+    selectedProperty?.taxRate,
+  ]);
 
   const roomTypes = useMemo(() => {
     const types = new Set(
@@ -697,6 +727,56 @@ export default function PropertiesPage() {
     }
 
     setPropertyName("");
+    await loadProperties();
+  }
+
+  async function updatePropertySettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const propertyId = selectedProperty?.id;
+
+    if (!propertyId) {
+      setError("Select a property before updating property settings.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setError(
+        "Select or create a workspace organization before updating settings.",
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/settings`,
+      {
+        body: JSON.stringify({
+          serviceChargeRate: propertyServiceChargeRate,
+          taxRate: propertyTaxRate,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(
+        await readApiMessage(response, "Could not update property settings."),
+      );
+      return;
+    }
+
     await loadProperties();
   }
 
@@ -2120,52 +2200,103 @@ export default function PropertiesPage() {
               ) : null}
 
               {activeWorkspaceTab === "setup" && data?.canManageProperties ? (
-                <section className="notice-panel compact-panel" id="add-rooms">
-                  <p className="eyebrow">Add rooms</p>
-                  <form className="inventory-form" onSubmit={createRooms}>
-                    <label>
-                      Type
-                      <input
-                        onChange={(event) => setRoomType(event.target.value)}
-                        placeholder="standard"
-                        required
-                        value={roomType}
-                      />
-                    </label>
-                    <label>
-                      Prefix
-                      <input
-                        onChange={(event) => setRoomPrefix(event.target.value)}
-                        placeholder="A"
-                        value={roomPrefix}
-                      />
-                    </label>
-                    <label>
-                      From
-                      <input
-                        inputMode="numeric"
-                        onChange={(event) => setRoomFrom(event.target.value)}
-                        placeholder="101"
-                        required
-                        value={roomFrom}
-                      />
-                    </label>
-                    <label>
-                      To
-                      <input
-                        inputMode="numeric"
-                        onChange={(event) => setRoomTo(event.target.value)}
-                        placeholder="120"
-                        required
-                        value={roomTo}
-                      />
-                    </label>
-                    <button disabled={isSubmitting} type="submit">
-                      <Plus aria-hidden="true" />
-                      Add rooms
-                    </button>
-                  </form>
-                </section>
+                <>
+                  <section
+                    className="notice-panel compact-panel"
+                    id="property-charges"
+                  >
+                    <p className="eyebrow">Property charges</p>
+                    <form
+                      className="inventory-form"
+                      onSubmit={updatePropertySettings}
+                    >
+                      <label>
+                        Service charge %
+                        <input
+                          inputMode="decimal"
+                          min="0"
+                          onChange={(event) =>
+                            setPropertyServiceChargeRate(event.target.value)
+                          }
+                          placeholder="10"
+                          step="0.01"
+                          type="number"
+                          value={propertyServiceChargeRate}
+                        />
+                      </label>
+                      <label>
+                        Tax %
+                        <input
+                          inputMode="decimal"
+                          min="0"
+                          onChange={(event) =>
+                            setPropertyTaxRate(event.target.value)
+                          }
+                          placeholder="16"
+                          step="0.01"
+                          type="number"
+                          value={propertyTaxRate}
+                        />
+                      </label>
+                      <button disabled={isSubmitting} type="submit">
+                        <Tags aria-hidden="true" />
+                        Save charges
+                      </button>
+                    </form>
+                  </section>
+
+                  <section
+                    className="notice-panel compact-panel"
+                    id="add-rooms"
+                  >
+                    <p className="eyebrow">Add rooms</p>
+                    <form className="inventory-form" onSubmit={createRooms}>
+                      <label>
+                        Type
+                        <input
+                          onChange={(event) => setRoomType(event.target.value)}
+                          placeholder="standard"
+                          required
+                          value={roomType}
+                        />
+                      </label>
+                      <label>
+                        Prefix
+                        <input
+                          onChange={(event) =>
+                            setRoomPrefix(event.target.value)
+                          }
+                          placeholder="A"
+                          value={roomPrefix}
+                        />
+                      </label>
+                      <label>
+                        From
+                        <input
+                          inputMode="numeric"
+                          onChange={(event) => setRoomFrom(event.target.value)}
+                          placeholder="101"
+                          required
+                          value={roomFrom}
+                        />
+                      </label>
+                      <label>
+                        To
+                        <input
+                          inputMode="numeric"
+                          onChange={(event) => setRoomTo(event.target.value)}
+                          placeholder="120"
+                          required
+                          value={roomTo}
+                        />
+                      </label>
+                      <button disabled={isSubmitting} type="submit">
+                        <Plus aria-hidden="true" />
+                        Add rooms
+                      </button>
+                    </form>
+                  </section>
+                </>
               ) : null}
 
               {activeWorkspaceTab === "rates" && data?.canManageProperties ? (

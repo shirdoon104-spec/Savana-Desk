@@ -100,6 +100,16 @@ class CreatePropertyDto {
   timezone?: string;
 }
 
+class UpdatePropertySettingsDto {
+  @IsOptional()
+  @IsString()
+  serviceChargeRate?: string;
+
+  @IsOptional()
+  @IsString()
+  taxRate?: string;
+}
+
 class CreateRoomsDto {
   @IsOptional()
   @IsString()
@@ -531,6 +541,8 @@ export class PropertiesController {
         currency: property.currency,
         id: property.id,
         name: property.name,
+        serviceChargeRate: property.serviceChargeRate,
+        taxRate: property.taxRate,
         restaurants: property.restaurants.map((restaurant) => ({
           id: restaurant.id,
           name: restaurant.name,
@@ -870,6 +882,33 @@ export class PropertiesController {
     });
 
     return property;
+  }
+
+  @Patch(":propertyId/settings")
+  @RequirePermission("property.manage")
+  async updateSettings(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Body() body: UpdatePropertySettingsDto,
+  ): Promise<Record<string, unknown>> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+
+    return this.prisma.property.update({
+      where: { id: property.id },
+      data: {
+        serviceChargeRate:
+          this.optionalPercentRate(
+            body.serviceChargeRate,
+            "Service charge rate",
+          ) ?? new Prisma.Decimal(0),
+        taxRate:
+          this.optionalPercentRate(body.taxRate, "Tax rate") ??
+          new Prisma.Decimal(0),
+      },
+    });
   }
 
   @Post(":propertyId/rooms")
@@ -1914,6 +1953,23 @@ export class PropertiesController {
     }
 
     return this.requiredDecimal(value, label);
+  }
+
+  private optionalPercentRate(
+    value: string | number | undefined,
+    label: string,
+  ): Prisma.Decimal | null {
+    if (value === undefined || value === null || String(value).trim() === "") {
+      return null;
+    }
+
+    const percent = this.requiredDecimal(value, label);
+
+    if (percent.greaterThan(100)) {
+      throw new BadRequestException(`${label} cannot be more than 100%.`);
+    }
+
+    return percent.div(100).toDecimalPlaces(6);
   }
 
   private requiredDecimal(
