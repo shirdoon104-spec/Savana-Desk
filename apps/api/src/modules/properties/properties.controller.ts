@@ -57,6 +57,17 @@ type HotelReservationSource =
   | "direct"
   | "ota"
   | "corporate";
+type RoomChargeLineItem = {
+  amount: Prisma.Decimal;
+  currency: string;
+  description: string;
+  postedById: string;
+  propertyId: string;
+  sourceType: string;
+  tenantId: string;
+  type: "room_night" | "service_charge" | "tax";
+  unitAmount: Prisma.Decimal;
+};
 
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   value === "" ? undefined : value;
@@ -1320,6 +1331,16 @@ export class PropertiesController {
             tenantId: context.tenant.id,
           })
         : null;
+    const roomChargeLineItems = roomNightQuote
+      ? this.buildRoomChargeLineItems({
+          postedById: context.tenantUser.clerkUserId,
+          property,
+          quote: roomNightQuote,
+          roomNumber: room.number,
+          tenantId: context.tenant.id,
+        })
+      : [];
+    const roomChargeTotal = this.sumFolioLineAmounts(roomChargeLineItems);
 
     const stay = await this.prisma.$transaction(async (tx) => {
       const guest = await tx.guest.create({
@@ -1365,38 +1386,19 @@ export class PropertiesController {
         },
       });
 
-      if (roomNightQuote) {
+      if (roomChargeLineItems.length > 0) {
         await tx.folioLineItem.createMany({
-          data: roomNightQuote.nightlyRates.map((rate) => {
-            const extraGuestCount = Math.max(
-              roomNightQuote.guestCount - rate.baseOccupancy,
-              0,
-            );
-            const extraGuestAmount = rate.extraGuestRate.mul(extraGuestCount);
-            const amount = rate.baseRate.plus(extraGuestAmount);
-
-            return {
-              amount,
-              currency: rate.currency,
-              description: `Room night ${room.number} - ${rate.date
-                .toISOString()
-                .slice(0, 10)}`,
-              folioId: guestFolio.id,
-              postedById: context.tenantUser.clerkUserId,
-              propertyId,
-              sourceId: createdStay.id,
-              sourceType: "stay",
-              tenantId: context.tenant.id,
-              type: "room_night",
-              unitAmount: amount,
-            };
-          }),
+          data: roomChargeLineItems.map((lineItem) => ({
+            ...lineItem,
+            folioId: guestFolio.id,
+            sourceId: createdStay.id,
+          })),
         });
 
         await tx.guestFolio.update({
           where: { id: guestFolio.id },
           data: {
-            balance: { increment: roomNightQuote.totalAmount },
+            balance: { increment: roomChargeTotal },
           },
         });
       }
@@ -1435,6 +1437,10 @@ export class PropertiesController {
           newState: {
             expectedCheckOutAt,
             folioId: guestFolio.id,
+            roomChargeTotal:
+              roomChargeLineItems.length > 0
+                ? roomChargeTotal.toString()
+                : null,
             roomNightChargeTotal:
               roomNightQuote?.totalAmount.toString() ?? null,
             roomNightCount: roomNightQuote?.nights ?? 0,
@@ -1982,6 +1988,96 @@ export class PropertiesController {
 
       throw error;
     }
+  }
+
+  private buildRoomChargeLineItems(input: {
+    postedById: string;
+    property: {
+      id: string;
+      serviceChargeRate: Prisma.Decimal | null;
+      taxRate: Prisma.Decimal | null;
+    };
+    quote: Awaited<ReturnType<HotelRateLookupService["lookup"]>>;
+    roomNumber: string;
+    tenantId: string;
+  }): RoomChargeLineItem[] {
+    const roomNightLines = input.quote.nightlyRates.map((rate) => {
+      const extraGuestCount = Math.max(
+        input.quote.guestCount - rate.baseOccupancy,
+        0,
+      );
+      const extraGuestAmount = rate.extraGuestRate.mul(extraGuestCount);
+      const amount = this.roundMoney(rate.baseRate.plus(extraGuestAmount));
+
+      return {
+        amount,
+        currency: rate.currency,
+        description: `Room night ${input.roomNumber} - ${rate.date
+          .toISOString()
+          .slice(0, 10)}`,
+        postedById: input.postedById,
+        propertyId: input.property.id,
+        sourceType: "stay",
+        tenantId: input.tenantId,
+        type: "room_night" as const,
+        unitAmount: amount,
+      };
+    });
+    const roomSubtotal = this.sumFolioLineAmounts(roomNightLines);
+    const currency = input.quote.currency;
+    const serviceChargeRate =
+      input.property.serviceChargeRate ?? new Prisma.Decimal(0);
+    const taxRate = input.property.taxRate ?? new Prisma.Decimal(0);
+    const serviceChargeAmount = this.roundMoney(
+      roomSubtotal.mul(serviceChargeRate),
+    );
+    const taxableBase = roomSubtotal.plus(serviceChargeAmount);
+    const taxAmount = this.roundMoney(taxableBase.mul(taxRate));
+    const lineItems: RoomChargeLineItem[] = [...roomNightLines];
+
+    if (serviceChargeAmount.greaterThan(0)) {
+      lineItems.push({
+        amount: serviceChargeAmount,
+        currency,
+        description: `Room service charge ${serviceChargeRate
+          .mul(100)
+          .toDecimalPlaces(2)
+          .toString()}%`,
+        postedById: input.postedById,
+        propertyId: input.property.id,
+        sourceType: "stay",
+        tenantId: input.tenantId,
+        type: "service_charge" as const,
+        unitAmount: serviceChargeAmount,
+      });
+    }
+
+    if (taxAmount.greaterThan(0)) {
+      lineItems.push({
+        amount: taxAmount,
+        currency,
+        description: `Room tax ${taxRate.mul(100).toDecimalPlaces(2).toString()}%`,
+        postedById: input.postedById,
+        propertyId: input.property.id,
+        sourceType: "stay",
+        tenantId: input.tenantId,
+        type: "tax" as const,
+        unitAmount: taxAmount,
+      });
+    }
+
+    return lineItems;
+  }
+
+  private sumFolioLineAmounts(lineItems: Array<{ amount: Prisma.Decimal }>) {
+    return lineItems.reduce(
+      (total, lineItem) => total.plus(lineItem.amount),
+      new Prisma.Decimal(0),
+    );
+  }
+
+  private roundMoney(value: Prisma.Decimal) {
+    return value.toDecimalPlaces(2);
   }
 
   private optionalNonNegativeInteger(value: number | string | undefined) {
