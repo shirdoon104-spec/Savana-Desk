@@ -1378,6 +1378,43 @@ export default function PropertiesPage() {
     setFolioLoadState("ready");
   }
 
+  async function recalculateRoomCharges() {
+    if (!selectedFolioId) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setError("Choose a workspace before recalculating room charges.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/folios/${selectedFolioId}/recalculate-room-charges`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        method: "POST",
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(
+        await readApiMessage(response, "Could not recalculate room charges."),
+      );
+      return;
+    }
+
+    await loadFolio(selectedFolioId);
+    await loadProperties();
+  }
+
   return (
     <div className="operations-grid">
       <section className="notice-panel operations-header">
@@ -1840,17 +1877,30 @@ export default function PropertiesPage() {
                             {selectedFolio.guest.lastName}
                           </h3>
                         </div>
-                        <button
-                          className="secondary-button"
-                          onClick={() => {
-                            setSelectedFolio(null);
-                            setSelectedFolioId("");
-                            setFolioLoadState("idle");
-                          }}
-                          type="button"
-                        >
-                          Close
-                        </button>
+                        <div className="room-action-row">
+                          {data?.canManageProperties &&
+                          selectedFolio.status === "open" ? (
+                            <button
+                              className="secondary-button"
+                              disabled={isSubmitting}
+                              onClick={recalculateRoomCharges}
+                              type="button"
+                            >
+                              Recalculate room charges
+                            </button>
+                          ) : null}
+                          <button
+                            className="secondary-button"
+                            onClick={() => {
+                              setSelectedFolio(null);
+                              setSelectedFolioId("");
+                              setFolioLoadState("idle");
+                            }}
+                            type="button"
+                          >
+                            Close
+                          </button>
+                        </div>
                       </div>
                       <div className="folio-summary-grid">
                         <div>

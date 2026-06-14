@@ -289,7 +289,7 @@ Goal: post nightly room charges from reservations/stays instead of relying only 
 - [x] Support complimentary stays.
 - [x] Support late checkout and extra-night charges.
 - [x] Add early check-in and late checkout fee configuration.
-- [ ] Support manual re-post/recalculate for open folios only.
+- [x] Support manual re-post/recalculate for open folios only.
 - [ ] Add nightly audit job later.
 
 Status as of 2026-06-14: MVP room-night posting is implemented at check-in.
@@ -324,6 +324,12 @@ Status as of 2026-06-14: property-level early check-in and late checkout fee
 configuration is stored and editable from the property Setup tab. The
 configuration captures threshold times, fee type (`none`, `fixed`, `percent`),
 and fee value for each rule.
+
+Status as of 2026-06-14: managers can manually recalculate automatic room
+charges on open folios. The action voids existing stay-sourced room-night,
+service-charge, and tax lines, posts freshly calculated lines, adjusts the folio
+balance by the difference, and writes a hotel audit log entry. Closed, locked,
+and complimentary folios are not recalculated.
 
 Posting rule:
 

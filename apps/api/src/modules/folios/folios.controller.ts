@@ -25,6 +25,7 @@ import { CurrentTenant } from "../auth/current-tenant.decorator";
 import { RequirePermission } from "../auth/require-permission.decorator";
 import { TenantPermissionGuard } from "../auth/tenant-permission.guard";
 import { PrismaService } from "../database/prisma.service";
+import { HotelRateLookupService } from "../properties/hotel-rate-lookup.service";
 import type { TenantContext } from "../tenancy/tenant-context.service";
 
 class ActiveStaySearchDto {
@@ -80,10 +81,25 @@ class PostFolioChargeDto {
   restaurantId!: string;
 }
 
+type RecalculatedRoomChargeLine = {
+  amount: Prisma.Decimal;
+  currency: string;
+  description: string;
+  postedById: string;
+  propertyId: string;
+  sourceType: string;
+  tenantId: string;
+  type: "room_night" | "service_charge" | "tax";
+  unitAmount: Prisma.Decimal;
+};
+
 @Controller()
 @UseGuards(ClerkAuthGuard, TenantPermissionGuard)
 export class FoliosController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rateLookup: HotelRateLookupService,
+  ) {}
 
   @Get("reports/restaurant-room-charges")
   @RequirePermission("billing.read")
@@ -465,6 +481,154 @@ export class FoliosController {
         status: folio.stay.status,
       },
     };
+  }
+
+  @Post("folios/:folioId/recalculate-room-charges")
+  @RequirePermission("property.manage")
+  async recalculateRoomCharges(
+    @CurrentTenant() context: TenantContext,
+    @Param("folioId") folioId: string,
+  ) {
+    const folio = await this.prisma.guestFolio.findFirst({
+      where: {
+        id: folioId,
+        status: "open",
+        tenantId: context.tenant.id,
+      },
+      include: {
+        lineItems: {
+          where: {
+            sourceType: "stay",
+            type: { in: ["room_night", "service_charge", "tax"] },
+            voidedAt: null,
+          },
+        },
+        property: true,
+        stay: {
+          include: {
+            hotelReservation: true,
+            room: true,
+          },
+        },
+      },
+    });
+
+    if (!folio) {
+      throw new BadRequestException(
+        "Only open guest folios can recalculate room charges.",
+      );
+    }
+
+    if (!folio.stay.expectedCheckOutAt) {
+      throw new BadRequestException(
+        "Set an expected check-out date before recalculating room charges.",
+      );
+    }
+
+    if (!folio.stay.room.roomTypeId) {
+      throw new BadRequestException(
+        "Assign a room type before recalculating room charges.",
+      );
+    }
+
+    if (folio.stay.hotelReservation?.isComplimentary) {
+      throw new BadRequestException(
+        "Complimentary stays do not post automatic room charges.",
+      );
+    }
+
+    const quote = await this.rateLookup.lookup({
+      arrivalDate: folio.stay.checkInAt,
+      departureDate: folio.stay.expectedCheckOutAt,
+      guestCount: folio.stay.hotelReservation
+        ? folio.stay.hotelReservation.adultCount +
+          folio.stay.hotelReservation.childCount
+        : 1,
+      propertyId: folio.propertyId,
+      ratePlanId: folio.stay.hotelReservation?.ratePlanId ?? undefined,
+      reservationRateOverride:
+        folio.stay.hotelReservation?.rateOverride ?? undefined,
+      roomTypeId: folio.stay.room.roomTypeId,
+      tenantId: context.tenant.id,
+    });
+    const lineItems = this.buildRecalculatedRoomChargeLines({
+      postedById: context.tenantUser.clerkUserId,
+      property: folio.property,
+      quote,
+      roomNumber: folio.stay.room.number,
+      tenantId: context.tenant.id,
+    });
+    const previousTotal = sumDecimals(
+      folio.lineItems.map((item) => item.amount),
+    );
+    const recalculatedTotal = sumDecimals(
+      lineItems.map((lineItem) => lineItem.amount),
+    );
+    const balanceDelta = recalculatedTotal.minus(previousTotal);
+
+    return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      if (folio.lineItems.length > 0) {
+        await tx.folioLineItem.updateMany({
+          where: {
+            id: { in: folio.lineItems.map((item) => item.id) },
+            tenantId: context.tenant.id,
+            voidedAt: null,
+          },
+          data: {
+            voidReason: "Recalculated room charges",
+            voidedAt: now,
+            voidedById: context.tenantUser.clerkUserId,
+          },
+        });
+      }
+
+      if (lineItems.length > 0) {
+        await tx.folioLineItem.createMany({
+          data: lineItems.map((lineItem) => ({
+            ...lineItem,
+            folioId: folio.id,
+            sourceId: folio.stayId,
+          })),
+        });
+      }
+
+      await tx.guestFolio.update({
+        where: { id: folio.id },
+        data: {
+          balance: { increment: balanceDelta },
+        },
+      });
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: "folio_room_charges_recalculated",
+          newState: {
+            balanceDelta: balanceDelta.toString(),
+            newLineItemCount: lineItems.length,
+            newTotal: recalculatedTotal.toString(),
+          },
+          previousState: {
+            previousLineItemCount: folio.lineItems.length,
+            previousTotal: previousTotal.toString(),
+          },
+          propertyId: folio.propertyId,
+          reservationId: folio.stay.hotelReservationId,
+          roomId: folio.stay.roomId,
+          stayId: folio.stayId,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      return {
+        balanceDelta: balanceDelta.toString(),
+        lineItemCount: lineItems.length,
+        totalAmount: recalculatedTotal.toString(),
+      };
+    });
   }
 
   @Post("folios/:folioId/charges")
@@ -1130,6 +1294,90 @@ export class FoliosController {
         coversInHouse,
       },
     };
+  }
+
+  private buildRecalculatedRoomChargeLines(input: {
+    postedById: string;
+    property: {
+      id: string;
+      serviceChargeRate: Prisma.Decimal | null;
+      taxRate: Prisma.Decimal | null;
+    };
+    quote: Awaited<ReturnType<HotelRateLookupService["lookup"]>>;
+    roomNumber: string;
+    tenantId: string;
+  }): RecalculatedRoomChargeLine[] {
+    const roomNightLines = input.quote.nightlyRates.map((rate) => {
+      const extraGuestCount = Math.max(
+        input.quote.guestCount - rate.baseOccupancy,
+        0,
+      );
+      const amount = rate.baseRate
+        .plus(rate.extraGuestRate.mul(extraGuestCount))
+        .toDecimalPlaces(2);
+
+      return {
+        amount,
+        currency: rate.currency,
+        description: `Room night ${input.roomNumber} - ${rate.date
+          .toISOString()
+          .slice(0, 10)}`,
+        postedById: input.postedById,
+        propertyId: input.property.id,
+        sourceType: "stay",
+        tenantId: input.tenantId,
+        type: "room_night" as const,
+        unitAmount: amount,
+      };
+    });
+    const roomSubtotal = sumDecimals(
+      roomNightLines.map((lineItem) => lineItem.amount),
+    );
+    const currency = input.quote.currency;
+    const serviceChargeRate =
+      input.property.serviceChargeRate ?? new Prisma.Decimal(0);
+    const taxRate = input.property.taxRate ?? new Prisma.Decimal(0);
+    const serviceChargeAmount = roomSubtotal
+      .mul(serviceChargeRate)
+      .toDecimalPlaces(2);
+    const taxAmount = roomSubtotal
+      .plus(serviceChargeAmount)
+      .mul(taxRate)
+      .toDecimalPlaces(2);
+    const lineItems: RecalculatedRoomChargeLine[] = [...roomNightLines];
+
+    if (serviceChargeAmount.greaterThan(0)) {
+      lineItems.push({
+        amount: serviceChargeAmount,
+        currency,
+        description: `Room service charge ${serviceChargeRate
+          .mul(100)
+          .toDecimalPlaces(2)
+          .toString()}%`,
+        postedById: input.postedById,
+        propertyId: input.property.id,
+        sourceType: "stay",
+        tenantId: input.tenantId,
+        type: "service_charge",
+        unitAmount: serviceChargeAmount,
+      });
+    }
+
+    if (taxAmount.greaterThan(0)) {
+      lineItems.push({
+        amount: taxAmount,
+        currency,
+        description: `Room tax ${taxRate.mul(100).toDecimalPlaces(2).toString()}%`,
+        postedById: input.postedById,
+        propertyId: input.property.id,
+        sourceType: "stay",
+        tenantId: input.tenantId,
+        type: "tax",
+        unitAmount: taxAmount,
+      });
+    }
+
+    return lineItems;
   }
 }
 
