@@ -332,6 +332,10 @@ class CheckInDto {
 class CheckOutDto {
   @IsOptional()
   @IsBoolean()
+  acknowledgeExtraNightCharges?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   acknowledgeRestaurantCharges?: boolean;
 }
 
@@ -1560,7 +1564,10 @@ export class PropertiesController {
     @Param("roomId") roomId: string,
     @Body() body: CheckOutDto,
   ): Promise<unknown> {
-    await this.findTenantProperty(context.tenant.id, propertyId);
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
     const room = await this.findTenantRoom(
       context.tenant.id,
       propertyId,
@@ -1572,6 +1579,9 @@ export class PropertiesController {
         roomId,
         status: "active",
         tenantId: context.tenant.id,
+      },
+      include: {
+        hotelReservation: true,
       },
       orderBy: { checkInAt: "desc" },
     });
@@ -1601,6 +1611,38 @@ export class PropertiesController {
     if (room.status !== "occupied") {
       throw new BadRequestException(
         "Only occupied rooms with an active stay can be checked out.",
+      );
+    }
+
+    const checkedOutAt = new Date();
+    const extraNightQuote = await this.tryBuildExtraNightQuote({
+      checkedOutAt,
+      propertyId,
+      roomTypeId: room.roomTypeId,
+      stay: activeStay,
+      tenantId: context.tenant.id,
+    });
+    const extraNightLineItems = extraNightQuote
+      ? this.buildRoomChargeLineItems({
+          descriptionPrefix: "Extra room night",
+          postedById: context.tenantUser.clerkUserId,
+          property,
+          quote: extraNightQuote,
+          roomNumber: room.number,
+          tenantId: context.tenant.id,
+        })
+      : [];
+    const extraNightChargeTotal = this.sumFolioLineAmounts(extraNightLineItems);
+
+    if (extraNightLineItems.length > 0 && !body?.acknowledgeExtraNightCharges) {
+      throw new BadRequestException(
+        `Review ${extraNightQuote?.nights ?? 0} extra room night${
+          extraNightQuote?.nights === 1 ? "" : "s"
+        } totaling ${
+          extraNightQuote?.currency ?? property.currency
+        } ${extraNightChargeTotal.toFixed(
+          2,
+        )} before checkout. Confirm checkout to post these charges.`,
       );
     }
 
@@ -1638,11 +1680,32 @@ export class PropertiesController {
     }
 
     const stay = await this.prisma.$transaction(async (tx) => {
+      const guestFolio = await tx.guestFolio.findUnique({
+        where: { stayId: activeStay.id },
+      });
+
+      if (extraNightLineItems.length > 0 && guestFolio) {
+        await tx.folioLineItem.createMany({
+          data: extraNightLineItems.map((lineItem) => ({
+            ...lineItem,
+            folioId: guestFolio.id,
+            sourceId: activeStay.id,
+          })),
+        });
+
+        await tx.guestFolio.update({
+          where: { id: guestFolio.id },
+          data: {
+            balance: { increment: extraNightChargeTotal },
+          },
+        });
+      }
+
       const completedStay = await tx.stay.update({
         where: { id: activeStay.id },
         data: {
           checkedOutByUserId: context.tenantUser.clerkUserId,
-          checkOutAt: new Date(),
+          checkOutAt: checkedOutAt,
           status: "checked_out",
         },
         include: {
@@ -1676,6 +1739,11 @@ export class PropertiesController {
           event: "check_out_completed",
           newState: {
             checkOutAt: completedStay.checkOutAt,
+            extraNightChargeTotal:
+              extraNightLineItems.length > 0
+                ? extraNightChargeTotal.toString()
+                : null,
+            extraNightCount: extraNightQuote?.nights ?? 0,
             folioStatus: "closed",
             roomStatus: "cleaning",
             stayStatus: completedStay.status,
@@ -2061,6 +2129,12 @@ export class PropertiesController {
     return new Date(trimmedValue);
   }
 
+  private toHotelDate(value: Date) {
+    return new Date(
+      Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
+    );
+  }
+
   private async tryBuildRoomNightQuote(input: {
     arrivalDate: Date;
     departureDate: Date;
@@ -2091,7 +2165,56 @@ export class PropertiesController {
     }
   }
 
+  private async tryBuildExtraNightQuote(input: {
+    checkedOutAt: Date;
+    propertyId: string;
+    roomTypeId: string | null;
+    stay: {
+      checkInAt: Date;
+      expectedCheckOutAt: Date | null;
+      hotelReservation: {
+        adultCount: number;
+        childCount: number;
+        isComplimentary: boolean;
+        rateOverride: Prisma.Decimal | null;
+        ratePlanId: string | null;
+      } | null;
+    };
+    tenantId: string;
+  }) {
+    if (
+      !input.roomTypeId ||
+      !input.stay.expectedCheckOutAt ||
+      input.stay.hotelReservation?.isComplimentary
+    ) {
+      return null;
+    }
+
+    const extraArrivalDate = this.toHotelDate(input.stay.expectedCheckOutAt);
+    const extraDepartureDate = this.toHotelDate(input.checkedOutAt);
+
+    if (extraDepartureDate <= extraArrivalDate) {
+      return null;
+    }
+
+    return this.tryBuildRoomNightQuote({
+      arrivalDate: extraArrivalDate,
+      departureDate: extraDepartureDate,
+      guestCount: input.stay.hotelReservation
+        ? input.stay.hotelReservation.adultCount +
+          input.stay.hotelReservation.childCount
+        : 1,
+      propertyId: input.propertyId,
+      ratePlanId: input.stay.hotelReservation?.ratePlanId ?? undefined,
+      reservationRateOverride:
+        input.stay.hotelReservation?.rateOverride ?? undefined,
+      roomTypeId: input.roomTypeId,
+      tenantId: input.tenantId,
+    });
+  }
+
   private buildRoomChargeLineItems(input: {
+    descriptionPrefix?: string;
     postedById: string;
     property: {
       id: string;
@@ -2113,9 +2236,9 @@ export class PropertiesController {
       return {
         amount,
         currency: rate.currency,
-        description: `Room night ${input.roomNumber} - ${rate.date
-          .toISOString()
-          .slice(0, 10)}`,
+        description: `${input.descriptionPrefix ?? "Room night"} ${
+          input.roomNumber
+        } - ${rate.date.toISOString().slice(0, 10)}`,
         postedById: input.postedById,
         propertyId: input.property.id,
         sourceType: "stay",

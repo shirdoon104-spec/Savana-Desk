@@ -1272,7 +1272,10 @@ export default function PropertiesPage() {
       `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/check-out`,
       {
         body: acknowledgeRestaurantCharges
-          ? JSON.stringify({ acknowledgeRestaurantCharges })
+          ? JSON.stringify({
+              acknowledgeExtraNightCharges: true,
+              acknowledgeRestaurantCharges: true,
+            })
           : undefined,
         headers: {
           Authorization: `Bearer ${token}`,
