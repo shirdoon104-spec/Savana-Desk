@@ -1131,6 +1131,17 @@ export class PropertiesController {
       );
     }
 
+    const rateOverride = this.optionalDecimal(
+      body.rateOverride,
+      "Rate override",
+    );
+
+    if (rateOverride && !hasTenantPermission(context.role, "property.manage")) {
+      throw new BadRequestException(
+        "Only property managers can apply reservation rate overrides.",
+      );
+    }
+
     const [firstName, ...lastNameParts] = body.guestName.trim().split(/\s+/);
     const lastName = lastNameParts.join(" ") || "Guest";
 
@@ -1165,7 +1176,7 @@ export class PropertiesController {
         },
         notes: body.notes?.trim() || null,
         propertyId: property.id,
-        rateOverride: this.optionalDecimal(body.rateOverride, "Rate override"),
+        rateOverride,
         ratePlanId: body.ratePlanId?.trim() || null,
         roomTypeId: roomType.id,
         source: body.source ?? "walk_in",

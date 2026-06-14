@@ -401,6 +401,7 @@ export default function PropertiesPage() {
   const [reservationChildCount, setReservationChildCount] = useState("0");
   const [reservationDepositRequired, setReservationDepositRequired] =
     useState("");
+  const [reservationRateOverride, setReservationRateOverride] = useState("");
   const [reservationNotes, setReservationNotes] = useState("");
   const [roomPrefix, setRoomPrefix] = useState("");
   const [roomFrom, setRoomFrom] = useState("");
@@ -1037,6 +1038,10 @@ export default function PropertiesPage() {
           guestName: reservationGuestName,
           guestPhone: reservationGuestPhone || undefined,
           notes: reservationNotes || undefined,
+          rateOverride:
+            data?.canManageProperties && reservationRateOverride
+              ? reservationRateOverride
+              : undefined,
           ratePlanId: reservationRatePlanId || undefined,
           roomTypeId: reservationRoomTypeId,
           source: reservationSource,
@@ -1063,6 +1068,7 @@ export default function PropertiesPage() {
     setReservationDepartureDate("");
     setReservationAssignedRoomId("");
     setReservationDepositRequired("");
+    setReservationRateOverride("");
     setReservationNotes("");
     await loadProperties();
   }
@@ -2089,6 +2095,19 @@ export default function PropertiesPage() {
                           />
                         </label>
                       </div>
+                      {data?.canManageProperties ? (
+                        <label>
+                          Rate override
+                          <input
+                            inputMode="decimal"
+                            onChange={(event) =>
+                              setReservationRateOverride(event.target.value)
+                            }
+                            placeholder={selectedProperty.currency}
+                            value={reservationRateOverride}
+                          />
+                        </label>
+                      ) : null}
                       <label>
                         Notes
                         <input
@@ -2131,11 +2150,15 @@ export default function PropertiesPage() {
                           <div>
                             <span>{formatLabel(reservation.source)}</span>
                             <small>
-                              Deposit{" "}
-                              {formatMoney(
-                                reservation.depositRequiredAmount,
-                                reservation.currency,
-                              )}
+                              {reservation.rateOverride
+                                ? `Override ${formatMoney(
+                                    reservation.rateOverride,
+                                    reservation.currency,
+                                  )}`
+                                : `Deposit ${formatMoney(
+                                    reservation.depositRequiredAmount,
+                                    reservation.currency,
+                                  )}`}
                             </small>
                           </div>
                           <select

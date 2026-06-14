@@ -285,7 +285,7 @@ Goal: post nightly room charges from reservations/stays instead of relying only 
 - [x] For MVP, create room-night folio line items at check-in for the reserved stay dates.
 - [x] Document that later night audit will replace upfront posting.
 - [x] Add taxes and service charges from configurable property/rate settings.
-- [ ] Support rate override with permission.
+- [x] Support rate override with permission.
 - [ ] Support complimentary stays.
 - [ ] Support late checkout and extra-night charges.
 - [ ] Add early check-in and late checkout fee configuration.
@@ -302,6 +302,12 @@ then service charge, then tax on subtotal plus service charge. Missing rate
 configuration does not block check-in yet; it simply leaves the folio without
 automatic room-night lines so existing front-desk workflows keep working. A
 future night audit can replace this upfront posting model.
+
+Status as of 2026-06-14: reservation rate override is permission gated.
+Users with `property.manage` can enter a one-off nightly override while creating
+a reservation. The API rejects override attempts from users without that
+permission, and check-in uses the saved override when posting room-night folio
+line items.
 
 Posting rule:
 
