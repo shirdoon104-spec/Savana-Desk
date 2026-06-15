@@ -219,6 +219,16 @@ interface RateLookupResponse {
 }
 
 interface FolioDetailResponse {
+  adjustments: Array<{
+    amount: string | number;
+    createdAt: string;
+    createdById: string;
+    currency: string;
+    id: string;
+    lineItemId: string | null;
+    reason: string;
+    status: string;
+  }>;
   balance: string | number;
   closedAt: string | null;
   currency: string;
@@ -2107,7 +2117,7 @@ export default function PropertiesPage() {
                         </div>
 
                         <div>
-                          <h4>Payments and legacy charges</h4>
+                          <h4>Payments, adjustments, and legacy charges</h4>
                           <div className="folio-row-list">
                             {selectedFolio.payments.map((payment) => (
                               <div className="folio-row" key={payment.id}>
@@ -2119,6 +2129,23 @@ export default function PropertiesPage() {
                                   {formatMoney(
                                     payment.amount,
                                     payment.currency,
+                                  )}
+                                </strong>
+                              </div>
+                            ))}
+                            {selectedFolio.adjustments.map((adjustment) => (
+                              <div className="folio-row" key={adjustment.id}>
+                                <div>
+                                  <strong>Folio adjustment</strong>
+                                  <span>{adjustment.reason}</span>
+                                  <span className="folio-row-submeta">
+                                    {formatLabel(adjustment.status)}
+                                  </span>
+                                </div>
+                                <strong>
+                                  {formatMoney(
+                                    adjustment.amount,
+                                    adjustment.currency,
                                   )}
                                 </strong>
                               </div>
@@ -2140,11 +2167,12 @@ export default function PropertiesPage() {
                                 </div>
                               ))}
                             {!selectedFolio.payments.length &&
+                            !selectedFolio.adjustments.length &&
                             !selectedFolio.legacyCharges.some(
                               (charge) => !charge.supersededByLineItem,
                             ) ? (
                               <div className="empty-state">
-                                No payments or legacy charges yet.
+                                No payments, adjustments, or legacy charges yet.
                               </div>
                             ) : null}
                           </div>

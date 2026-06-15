@@ -486,13 +486,22 @@ export class FoliosController {
           (item) =>
             item.type === "restaurant_charge" &&
             item.sourceType === "restaurant_order" &&
-            item.sourceId &&
-            !item.voidedAt,
+            item.sourceId,
         )
         .map((item) => item.sourceId as string),
     );
 
     return {
+      adjustments: folio.adjustments.map((adjustment) => ({
+        amount: adjustment.amount.toString(),
+        createdAt: adjustment.createdAt,
+        createdById: adjustment.createdById,
+        currency: adjustment.currency,
+        id: adjustment.id,
+        lineItemId: adjustment.lineItemId,
+        reason: adjustment.reason,
+        status: adjustment.status,
+      })),
       balance: folio.balance.toString(),
       closedAt: folio.closedAt,
       currency: folio.currency,
@@ -527,7 +536,7 @@ export class FoliosController {
                       restaurantName: order.restaurant.name,
                       tableId: order.tableId,
                       tableName: order.tableId
-                        ? restaurantTableMap.get(order.tableId)?.name ?? null
+                        ? (restaurantTableMap.get(order.tableId)?.name ?? null)
                         : null,
                       totalAmount: order.totalAmount.toString(),
                       totalCurrency: order.currency,
@@ -786,7 +795,9 @@ export class FoliosController {
     }
 
     if (lineItem.voidedAt) {
-      throw new BadRequestException("This folio line item is already reversed.");
+      throw new BadRequestException(
+        "This folio line item is already reversed.",
+      );
     }
 
     const reversalAmount = new Prisma.Decimal(lineItem.amount).negated();
