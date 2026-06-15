@@ -392,8 +392,8 @@ permission-gated Reverse action with a required reason modal.
 
 Goal: make checkout a controlled settlement process.
 
-- [ ] Add checkout preview endpoint.
-- [ ] Show folio balance, payments, deposits, taxes, and outstanding amount.
+- [x] Add checkout preview endpoint.
+- [x] Show folio balance, payments, deposits, taxes, and outstanding amount.
 - [ ] Apply deposits in checkout preview.
 - [ ] Refund or carry forward excess deposits.
 - [ ] Require settlement or authorized balance before final checkout.
@@ -433,6 +433,13 @@ Folio lock pre-checks:
 - No pending `OrderPayment(method = room_charge)` records are linked to the folio.
 - Deposits are fully applied, refunded, or carried forward.
 - Folio has not already been locked.
+
+Status as of 2026-06-15: checkout preview is available through
+`GET /properties/:propertyId/rooms/:roomId/checkout-preview`. The preview uses
+the same extra-night calculation as checkout and returns folio balance, active
+line total, payments, deposits, tax, service charge, restaurant room charges,
+adjustments, projected total, and outstanding amount. The property room card now
+loads this preview before final checkout confirmation.
 
 ## Phase 7: Housekeeping and Maintenance
 

@@ -2031,6 +2031,29 @@ textarea {
   margin: 0;
 }
 
+.checkout-preview-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.checkout-preview-grid span {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 3px;
+  padding: 8px;
+}
+
+.checkout-preview-grid strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
 .checkout-review-actions {
   display: grid;
   gap: 8px;

@@ -1817,6 +1817,139 @@ export class PropertiesController {
     return stay;
   }
 
+  @Get(":propertyId/rooms/:roomId/checkout-preview")
+  @RequirePermission("reservations.manage")
+  async checkoutPreview(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("roomId") roomId: string,
+  ) {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      roomId,
+    );
+    const activeStay = await this.prisma.stay.findFirst({
+      where: {
+        propertyId,
+        roomId,
+        status: "active",
+        tenantId: context.tenant.id,
+      },
+      include: {
+        guest: true,
+        guestFolio: {
+          include: {
+            adjustments: true,
+            lineItems: true,
+            payments: true,
+          },
+        },
+        hotelReservation: true,
+      },
+      orderBy: { checkInAt: "desc" },
+    });
+
+    if (!activeStay || room.status !== "occupied") {
+      throw new BadRequestException(
+        "Only occupied rooms with an active stay can be previewed for checkout.",
+      );
+    }
+
+    const previewedAt = new Date();
+    const extraNightQuote = await this.tryBuildExtraNightQuote({
+      checkedOutAt: previewedAt,
+      propertyId,
+      roomTypeId: room.roomTypeId,
+      stay: activeStay,
+      tenantId: context.tenant.id,
+    });
+    const extraNightLineItems = extraNightQuote
+      ? this.buildRoomChargeLineItems({
+          descriptionPrefix: "Extra room night",
+          postedById: context.tenantUser.clerkUserId,
+          property,
+          quote: extraNightQuote,
+          roomNumber: room.number,
+          tenantId: context.tenant.id,
+        })
+      : [];
+    const activeLineItems =
+      activeStay.guestFolio?.lineItems.filter((item) => !item.voidedAt) ?? [];
+    const postedAdjustments =
+      activeStay.guestFolio?.adjustments.filter(
+        (adjustment) => adjustment.status === "posted",
+      ) ?? [];
+    const confirmedPayments =
+      activeStay.guestFolio?.payments.filter(
+        (payment) => payment.status === "confirmed",
+      ) ?? [];
+    const lineItemTotal = this.sumFolioLineAmounts(activeLineItems);
+    const adjustmentTotal = this.sumFolioLineAmounts(postedAdjustments);
+    const paymentTotal = this.sumFolioLineAmounts(confirmedPayments);
+    const extraNightChargeTotal = this.sumFolioLineAmounts(extraNightLineItems);
+    const projectedChargeTotal = lineItemTotal
+      .plus(adjustmentTotal)
+      .plus(extraNightChargeTotal);
+    const outstandingAmount = projectedChargeTotal.minus(paymentTotal);
+    const amountByType = (type: string) =>
+      this.sumFolioLineAmounts(
+        activeLineItems.filter((item) => item.type === type),
+      );
+    const extraAmountByType = (type: string) =>
+      this.sumFolioLineAmounts(
+        extraNightLineItems.filter((item) => item.type === type),
+      );
+
+    return {
+      adjustmentTotal: adjustmentTotal.toString(),
+      currency:
+        activeStay.guestFolio?.currency ??
+        extraNightQuote?.currency ??
+        property.currency,
+      depositTotal: amountByType("deposit").toString(),
+      extraNightChargeTotal: extraNightChargeTotal.toString(),
+      extraNightCount: extraNightQuote?.nights ?? 0,
+      extraNightLines: extraNightLineItems.map((lineItem) => ({
+        amount: lineItem.amount.toString(),
+        currency: lineItem.currency,
+        description: lineItem.description,
+        type: lineItem.type,
+      })),
+      folioBalance: activeStay.guestFolio?.balance.toString() ?? "0",
+      folioId: activeStay.guestFolio?.id ?? null,
+      lineItemTotal: lineItemTotal.toString(),
+      outstandingAmount: outstandingAmount.toString(),
+      paymentTotal: paymentTotal.toString(),
+      projectedChargeTotal: projectedChargeTotal.toString(),
+      restaurantChargeCount: activeLineItems.filter(
+        (item) => item.type === "restaurant_charge",
+      ).length,
+      restaurantChargeTotal: amountByType("restaurant_charge").toString(),
+      room: {
+        id: room.id,
+        number: room.number,
+      },
+      roomNightTotal: amountByType("room_night")
+        .plus(extraAmountByType("room_night"))
+        .toString(),
+      serviceChargeTotal: amountByType("service_charge")
+        .plus(extraAmountByType("service_charge"))
+        .toString(),
+      stay: {
+        checkInAt: activeStay.checkInAt,
+        expectedCheckOutAt: activeStay.expectedCheckOutAt,
+        guestName: `${activeStay.guest.firstName} ${activeStay.guest.lastName}`,
+        id: activeStay.id,
+      },
+      taxTotal: amountByType("tax").plus(extraAmountByType("tax")).toString(),
+    };
+  }
+
   @Patch(":propertyId/rooms/:roomId/status")
   @RequirePermission("rooms.read")
   async updateRoomStatus(

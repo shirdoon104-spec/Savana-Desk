@@ -305,6 +305,41 @@ interface FolioDetailResponse {
   };
 }
 
+interface CheckoutPreviewResponse {
+  adjustmentTotal: string | number;
+  currency: string;
+  depositTotal: string | number;
+  extraNightChargeTotal: string | number;
+  extraNightCount: number;
+  extraNightLines: Array<{
+    amount: string | number;
+    currency: string;
+    description: string;
+    type: string;
+  }>;
+  folioBalance: string | number;
+  folioId: string | null;
+  lineItemTotal: string | number;
+  outstandingAmount: string | number;
+  paymentTotal: string | number;
+  projectedChargeTotal: string | number;
+  restaurantChargeCount: number;
+  restaurantChargeTotal: string | number;
+  room: {
+    id: string;
+    number: string;
+  };
+  roomNightTotal: string | number;
+  serviceChargeTotal: string | number;
+  stay: {
+    checkInAt: string;
+    expectedCheckOutAt: string | null;
+    guestName: string;
+    id: string;
+  };
+  taxTotal: string | number;
+}
+
 const roomStatuses = [
   "available",
   "occupied",
@@ -493,7 +528,7 @@ export default function PropertiesPage() {
   const [guestEmail, setGuestEmail] = useState("");
   const [expectedCheckOutAt, setExpectedCheckOutAt] = useState("");
   const [checkoutReview, setCheckoutReview] = useState<{
-    message: string;
+    preview: CheckoutPreviewResponse;
     roomId: string;
   } | null>(null);
   const [selectedFolio, setSelectedFolio] =
@@ -1391,12 +1426,6 @@ export default function PropertiesPage() {
         "Could not check out guest.",
       );
 
-      if (response.status === 400 && message.startsWith("Review ")) {
-        setCheckoutReview({ message, roomId });
-        setIsSubmitting(false);
-        return;
-      }
-
       setError(message);
       setIsSubmitting(false);
       return;
@@ -1408,6 +1437,39 @@ export default function PropertiesPage() {
     if (selectedFolioId) {
       await loadFolio(selectedFolioId);
     }
+  }
+
+  async function previewCheckout(roomId: string) {
+    setIsSubmitting(true);
+    setError(null);
+
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+
+    if (!token || !propertyId) {
+      setError("Choose a property before previewing checkout.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/checkout-preview`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not preview checkout."));
+      return;
+    }
+
+    setCheckoutReview({
+      preview: (await response.json()) as CheckoutPreviewResponse,
+      roomId,
+    });
   }
 
   async function loadFolio(folioId: string) {
@@ -1864,7 +1926,7 @@ export default function PropertiesPage() {
                             <button
                               className="secondary-button"
                               disabled={isSubmitting}
-                              onClick={() => checkOutGuest(room.id)}
+                              onClick={() => previewCheckout(room.id)}
                               type="button"
                             >
                               Check out
@@ -1873,8 +1935,84 @@ export default function PropertiesPage() {
                         ) : null}
                         {checkoutReview?.roomId === room.id ? (
                           <div className="checkout-review">
-                            <strong>Review room charges</strong>
-                            <p>{checkoutReview.message}</p>
+                            <strong>Checkout preview</strong>
+                            <div className="checkout-preview-grid">
+                              <span>
+                                Balance
+                                <strong>
+                                  {formatMoney(
+                                    checkoutReview.preview.folioBalance,
+                                    checkoutReview.preview.currency,
+                                  )}
+                                </strong>
+                              </span>
+                              <span>
+                                Payments
+                                <strong>
+                                  {formatMoney(
+                                    checkoutReview.preview.paymentTotal,
+                                    checkoutReview.preview.currency,
+                                  )}
+                                </strong>
+                              </span>
+                              <span>
+                                Deposits
+                                <strong>
+                                  {formatMoney(
+                                    checkoutReview.preview.depositTotal,
+                                    checkoutReview.preview.currency,
+                                  )}
+                                </strong>
+                              </span>
+                              <span>
+                                Outstanding
+                                <strong>
+                                  {formatMoney(
+                                    checkoutReview.preview.outstandingAmount,
+                                    checkoutReview.preview.currency,
+                                  )}
+                                </strong>
+                              </span>
+                            </div>
+                            <p>
+                              Room nights{" "}
+                              {formatMoney(
+                                checkoutReview.preview.roomNightTotal,
+                                checkoutReview.preview.currency,
+                              )}
+                              , service charges{" "}
+                              {formatMoney(
+                                checkoutReview.preview.serviceChargeTotal,
+                                checkoutReview.preview.currency,
+                              )}
+                              , taxes{" "}
+                              {formatMoney(
+                                checkoutReview.preview.taxTotal,
+                                checkoutReview.preview.currency,
+                              )}
+                              , restaurant room charges{" "}
+                              {formatMoney(
+                                checkoutReview.preview.restaurantChargeTotal,
+                                checkoutReview.preview.currency,
+                              )}
+                              .
+                            </p>
+                            {checkoutReview.preview.extraNightCount > 0 ? (
+                              <p>
+                                Includes{" "}
+                                {checkoutReview.preview.extraNightCount} extra
+                                room night
+                                {checkoutReview.preview.extraNightCount === 1
+                                  ? ""
+                                  : "s"}{" "}
+                                totaling{" "}
+                                {formatMoney(
+                                  checkoutReview.preview.extraNightChargeTotal,
+                                  checkoutReview.preview.currency,
+                                )}
+                                .
+                              </p>
+                            ) : null}
                             <div className="checkout-review-actions">
                               <button
                                 className="secondary-button"
