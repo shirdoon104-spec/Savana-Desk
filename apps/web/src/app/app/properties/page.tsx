@@ -9,6 +9,7 @@ import {
   DoorOpen,
   Plus,
   RefreshCw,
+  RotateCcw,
   Tags,
 } from "lucide-react";
 import type { FormEvent } from "react";
@@ -57,6 +58,7 @@ const hotelWorkspaceTabs: Array<{
 
 interface PropertyResponse {
   allowedRoomStatuses: string[];
+  canManageBilling: boolean;
   canManageProperties: boolean;
   canManageRooms: boolean;
   canManageStays: boolean;
@@ -319,9 +321,7 @@ function formatMoney(value: string | number | null | undefined, currency = "") {
   return `${currency ? `${currency} ` : ""}${amount.toFixed(2)}`;
 }
 
-function formatFolioLineMeta(
-  item: FolioDetailResponse["lineItems"][number],
-) {
+function formatFolioLineMeta(item: FolioDetailResponse["lineItems"][number]) {
   const parts = [
     formatLabel(item.type),
     item.sourceType ? formatLabel(item.sourceType) : null,
@@ -344,9 +344,7 @@ function formatFolioLineMeta(
   return parts.filter(Boolean).join(" - ");
 }
 
-function formatFolioLineTitle(
-  item: FolioDetailResponse["lineItems"][number],
-) {
+function formatFolioLineTitle(item: FolioDetailResponse["lineItems"][number]) {
   if (item.restaurantCharge) {
     return "Restaurant order";
   }
@@ -492,6 +490,11 @@ export default function PropertiesPage() {
     useState<FolioDetailResponse | null>(null);
   const [selectedFolioId, setSelectedFolioId] = useState("");
   const [folioLoadState, setFolioLoadState] = useState<LoadState>("idle");
+  const [reverseLineItem, setReverseLineItem] = useState<
+    FolioDetailResponse["lineItems"][number] | null
+  >(null);
+  const [reverseReason, setReverseReason] = useState("");
+  const [reverseError, setReverseError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const earliestExpectedCheckOutDate = useMemo(
     () => dateInputDaysFromNow(1),
@@ -1463,6 +1466,59 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
+  async function reverseFolioLineItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedFolioId || !reverseLineItem) {
+      return;
+    }
+
+    const reason = reverseReason.trim();
+
+    if (reason.length < 3) {
+      setReverseError("Enter a reversal reason.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setReverseError(null);
+    setError(null);
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setReverseError("Choose a workspace before reversing a folio line.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/folios/${selectedFolioId}/line-items/${reverseLineItem.id}/reverse`,
+      {
+        body: JSON.stringify({ reason }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setReverseError(
+        await readApiMessage(response, "Could not reverse folio line item."),
+      );
+      return;
+    }
+
+    setReverseLineItem(null);
+    setReverseReason("");
+    await loadFolio(selectedFolioId);
+    await loadProperties();
+  }
+
   return (
     <div className="operations-grid">
       <section className="notice-panel operations-header">
@@ -1993,7 +2049,9 @@ export default function PropertiesPage() {
                               .map((item) => (
                                 <div className="folio-row" key={item.id}>
                                   <div>
-                                    <strong>{formatFolioLineTitle(item)}</strong>
+                                    <strong>
+                                      {formatFolioLineTitle(item)}
+                                    </strong>
                                     <span className="folio-row-meta">
                                       {formatFolioLineMeta(item)}
                                     </span>
@@ -2013,9 +2071,29 @@ export default function PropertiesPage() {
                                       </span>
                                     ) : null}
                                   </div>
-                                  <strong>
-                                    {formatMoney(item.amount, item.currency)}
-                                  </strong>
+                                  <div className="folio-row-actions">
+                                    <strong>
+                                      {formatMoney(item.amount, item.currency)}
+                                    </strong>
+                                    {data?.canManageBilling &&
+                                    ["open", "pending_checkout"].includes(
+                                      selectedFolio.status,
+                                    ) ? (
+                                      <button
+                                        className="folio-reverse-button"
+                                        disabled={isSubmitting}
+                                        onClick={() => {
+                                          setReverseLineItem(item);
+                                          setReverseReason("");
+                                          setReverseError(null);
+                                        }}
+                                        type="button"
+                                      >
+                                        <RotateCcw aria-hidden="true" />
+                                        Reverse
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 </div>
                               ))}
                             {!selectedFolio.lineItems.some(
@@ -2075,6 +2153,66 @@ export default function PropertiesPage() {
                     </section>
                   ) : folioLoadState === "loading" ? (
                     <div className="empty-state">Loading folio...</div>
+                  ) : null}
+
+                  {reverseLineItem ? (
+                    <div className="modal-backdrop">
+                      <section className="reservation-modal folio-reversal-modal">
+                        <div className="reservation-modal-header">
+                          <p className="eyebrow">Folio reversal</p>
+                          <h3>{formatFolioLineTitle(reverseLineItem)}</h3>
+                          <p>
+                            {formatMoney(
+                              reverseLineItem.amount,
+                              reverseLineItem.currency,
+                            )}{" "}
+                            will be reversed with an audit adjustment.
+                          </p>
+                        </div>
+                        <form
+                          className="reservation-modal-body"
+                          onSubmit={reverseFolioLineItem}
+                        >
+                          <label className="folio-reversal-reason">
+                            Reversal reason
+                            <textarea
+                              maxLength={240}
+                              onChange={(event) =>
+                                setReverseReason(event.target.value)
+                              }
+                              placeholder="Guest disputed the restaurant charge"
+                              required
+                              value={reverseReason}
+                            />
+                          </label>
+                          {reverseError ? (
+                            <div className="form-error">{reverseError}</div>
+                          ) : null}
+                          <div className="checkout-review-actions">
+                            <button
+                              className="danger-button"
+                              disabled={isSubmitting}
+                              type="submit"
+                            >
+                              <RotateCcw aria-hidden="true" />
+                              Reverse line
+                            </button>
+                            <button
+                              className="secondary-button"
+                              disabled={isSubmitting}
+                              onClick={() => {
+                                setReverseLineItem(null);
+                                setReverseReason("");
+                                setReverseError(null);
+                              }}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      </section>
+                    </div>
                   ) : null}
 
                   {!selectedProperty.rooms.length ? (

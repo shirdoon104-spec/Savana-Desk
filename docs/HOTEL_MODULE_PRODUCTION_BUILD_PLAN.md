@@ -385,7 +385,8 @@ reason, only works on open/pending checkout folios, voids the active line item,
 creates an append-only negative `FolioAdjustment`, updates the folio balance,
 and writes hotel audit logs. Restaurant charge-to-room reversals also mark the
 matching `room_charge` order payment as refunded when it can be linked and write
-a restaurant payment-refund audit log.
+a restaurant payment-refund audit log. The property folio UI exposes this as a
+permission-gated Reverse action with a required reason modal.
 
 ## Phase 6: Checkout and Settlement
 

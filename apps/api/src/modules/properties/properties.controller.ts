@@ -565,6 +565,7 @@ export class PropertiesController {
 
     return {
       allowedRoomStatuses: allowedRoomStatusesForRole(context.role),
+      canManageBilling: hasTenantPermission(context.role, "billing.manage"),
       canManageStays: hasTenantPermission(context.role, "reservations.manage"),
       canManageRooms: hasTenantPermission(context.role, "rooms.manage"),
       canManageProperties: hasTenantPermission(context.role, "property.manage"),

@@ -293,16 +293,33 @@ button:active:not(:disabled) {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgba(15, 118, 110, 0.24);
   outline-offset: 2px;
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.11);
   outline: none;
+}
+
+textarea {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 750;
+  line-height: 1.45;
+  min-height: 92px;
+  min-width: 0;
+  padding: 10px 12px;
+  resize: vertical;
+  width: 100%;
 }
 
 .button-link {
@@ -2093,6 +2110,48 @@ select:focus {
 
 .folio-row strong {
   overflow-wrap: anywhere;
+}
+
+.folio-row-actions {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.folio-reverse-button {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 850;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.folio-reverse-button:hover:not(:disabled) {
+  background: #ffedd5;
+  box-shadow: none;
+  color: #9a3412;
+}
+
+.folio-reverse-button svg {
+  height: 14px;
+  width: 14px;
+}
+
+.folio-reversal-modal {
+  max-width: 560px;
+}
+
+.folio-reversal-reason {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
 }
 
 .inventory-form {
