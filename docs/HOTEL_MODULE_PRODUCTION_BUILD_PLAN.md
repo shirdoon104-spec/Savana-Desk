@@ -358,7 +358,7 @@ Goal: improve the existing restaurant charge-to-room workflow.
 - [x] Keep idempotent posting with source references.
 - [x] Link restaurant order, order payment, and folio line item in the same transaction.
 - [x] Prevent duplicate room charge for the same restaurant order.
-- [ ] Show room charge details on folio detail page.
+- [x] Show room charge details on folio detail page.
 - [ ] Allow reversal only through an adjustment or refund workflow.
 - [ ] Add audit log for charge-to-room posting and reversal.
 
@@ -374,6 +374,10 @@ Status as of 2026-06-15: restaurant charge-to-room now posts to the explicit
 the room-charge payment metadata/audit trail. `FolioCharge` has a tenant/order
 uniqueness guard so a restaurant order cannot be charged to a room twice, even
 under concurrent requests.
+
+Status as of 2026-06-15: folio detail line items now show restaurant
+charge-to-room source details, including the restaurant, table, source order,
+and order payment status when that source order is still available.
 
 ## Phase 6: Checkout and Settlement
 

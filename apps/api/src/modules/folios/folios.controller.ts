@@ -417,6 +417,63 @@ export class FoliosController {
         .filter((payment) => payment.status === "confirmed")
         .map((payment) => payment.amount),
     );
+    const restaurantOrderIds = [
+      ...new Set(
+        folio.lineItems
+          .filter(
+            (item) =>
+              item.type === "restaurant_charge" &&
+              item.sourceType === "restaurant_order" &&
+              item.sourceId,
+          )
+          .map((item) => item.sourceId as string),
+      ),
+    ];
+    const restaurantOrders = restaurantOrderIds.length
+      ? await this.prisma.order.findMany({
+          where: {
+            id: { in: restaurantOrderIds },
+            tenantId: context.tenant.id,
+          },
+          select: {
+            createdAt: true,
+            currency: true,
+            id: true,
+            paymentStatus: true,
+            restaurant: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            status: true,
+            tableId: true,
+            totalAmount: true,
+          },
+        })
+      : [];
+    const restaurantTables = restaurantOrders.some((order) => order.tableId)
+      ? await this.prisma.restaurantTable.findMany({
+          where: {
+            id: {
+              in: restaurantOrders
+                .map((order) => order.tableId)
+                .filter((tableId): tableId is string => Boolean(tableId)),
+            },
+            tenantId: context.tenant.id,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        })
+      : [];
+    const restaurantOrderMap = new Map(
+      restaurantOrders.map((order) => [order.id, order]),
+    );
+    const restaurantTableMap = new Map(
+      restaurantTables.map((table) => [table.id, table]),
+    );
 
     return {
       balance: folio.balance.toString(),
@@ -437,6 +494,41 @@ export class FoliosController {
         currency: item.currency,
         description: item.description,
         id: item.id,
+        restaurantCharge:
+          item.type === "restaurant_charge" &&
+          item.sourceType === "restaurant_order" &&
+          item.sourceId
+            ? (() => {
+                const order = restaurantOrderMap.get(item.sourceId as string);
+                return order
+                  ? {
+                      chargedAt: order.createdAt,
+                      orderId: order.id,
+                      orderStatus: order.status,
+                      paymentStatus: order.paymentStatus,
+                      restaurantId: order.restaurant.id,
+                      restaurantName: order.restaurant.name,
+                      tableId: order.tableId,
+                      tableName: order.tableId
+                        ? restaurantTableMap.get(order.tableId)?.name ?? null
+                        : null,
+                      totalAmount: order.totalAmount.toString(),
+                      totalCurrency: order.currency,
+                    }
+                  : {
+                      chargedAt: null,
+                      orderId: item.sourceId,
+                      orderStatus: null,
+                      paymentStatus: null,
+                      restaurantId: null,
+                      restaurantName: null,
+                      tableId: null,
+                      tableName: null,
+                      totalAmount: item.amount.toString(),
+                      totalCurrency: item.currency,
+                    };
+              })()
+            : null,
         sourceId: item.sourceId,
         sourceType: item.sourceType,
         type: item.type,

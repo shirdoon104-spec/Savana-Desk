@@ -235,6 +235,18 @@ interface FolioDetailResponse {
     currency: string;
     description: string;
     id: string;
+    restaurantCharge: {
+      chargedAt: string | null;
+      orderId: string;
+      orderStatus: string | null;
+      paymentStatus: string | null;
+      restaurantId: string | null;
+      restaurantName: string | null;
+      tableId: string | null;
+      tableName: string | null;
+      totalAmount: string | number;
+      totalCurrency: string;
+    } | null;
     sourceId: string | null;
     sourceType: string | null;
     type: string;
@@ -304,6 +316,29 @@ function formatMoney(value: string | number | null | undefined, currency = "") {
   }
 
   return `${currency ? `${currency} ` : ""}${amount.toFixed(2)}`;
+}
+
+function formatFolioLineMeta(
+  item: FolioDetailResponse["lineItems"][number],
+) {
+  const parts = [
+    formatLabel(item.type),
+    item.sourceType ? formatLabel(item.sourceType) : null,
+  ];
+
+  if (item.restaurantCharge) {
+    parts.push(item.restaurantCharge.restaurantName);
+    parts.push(item.restaurantCharge.tableName);
+    parts.push(`Order ${item.restaurantCharge.orderId.slice(-8)}`);
+  } else if (item.sourceId) {
+    parts.push(`Source ${item.sourceId.slice(-8)}`);
+  }
+
+  if (item.voidedAt) {
+    parts.push("Voided");
+  }
+
+  return parts.filter(Boolean).join(" - ");
 }
 
 function formatRatePercent(value: string | number | null | undefined) {
@@ -1944,12 +1979,23 @@ export default function PropertiesPage() {
                               <div className="folio-row" key={item.id}>
                                 <div>
                                   <strong>{item.description}</strong>
-                                  <span>
-                                    {formatLabel(item.type)}
-                                    {item.sourceType
-                                      ? ` - ${formatLabel(item.sourceType)}`
-                                      : ""}
+                                  <span className="folio-row-meta">
+                                    {formatFolioLineMeta(item)}
                                   </span>
+                                  {item.restaurantCharge ? (
+                                    <span className="folio-row-submeta">
+                                      {formatMoney(
+                                        item.restaurantCharge.totalAmount,
+                                        item.restaurantCharge.totalCurrency,
+                                      )}{" "}
+                                      restaurant order
+                                      {item.restaurantCharge.paymentStatus
+                                        ? ` - ${formatLabel(
+                                            item.restaurantCharge.paymentStatus,
+                                          )}`
+                                        : ""}
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <strong>
                                   {formatMoney(item.amount, item.currency)}
