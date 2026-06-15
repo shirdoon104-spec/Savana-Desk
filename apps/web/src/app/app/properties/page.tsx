@@ -260,6 +260,7 @@ interface FolioDetailResponse {
     id: string;
     orderId: string | null;
     restaurantId: string | null;
+    supersededByLineItem: boolean;
   }>;
   openedAt: string;
   paymentTotal: string | number;
@@ -330,6 +331,8 @@ function formatFolioLineMeta(
     parts.push(item.restaurantCharge.restaurantName);
     parts.push(item.restaurantCharge.tableName);
     parts.push(`Order ${item.restaurantCharge.orderId.slice(-8)}`);
+  } else if (item.sourceType === "stay") {
+    parts.push("Stay");
   } else if (item.sourceId) {
     parts.push(`Source ${item.sourceId.slice(-8)}`);
   }
@@ -2027,19 +2030,26 @@ export default function PropertiesPage() {
                                 </strong>
                               </div>
                             ))}
-                            {selectedFolio.legacyCharges.map((charge) => (
-                              <div className="folio-row" key={charge.id}>
-                                <div>
-                                  <strong>{charge.description}</strong>
-                                  <span>Legacy room charge</span>
+                            {selectedFolio.legacyCharges
+                              .filter((charge) => !charge.supersededByLineItem)
+                              .map((charge) => (
+                                <div className="folio-row" key={charge.id}>
+                                  <div>
+                                    <strong>{charge.description}</strong>
+                                    <span>Legacy room charge</span>
+                                  </div>
+                                  <strong>
+                                    {formatMoney(
+                                      charge.amount,
+                                      charge.currency,
+                                    )}
+                                  </strong>
                                 </div>
-                                <strong>
-                                  {formatMoney(charge.amount, charge.currency)}
-                                </strong>
-                              </div>
-                            ))}
+                              ))}
                             {!selectedFolio.payments.length &&
-                            !selectedFolio.legacyCharges.length ? (
+                            !selectedFolio.legacyCharges.some(
+                              (charge) => !charge.supersededByLineItem,
+                            ) ? (
                               <div className="empty-state">
                                 No payments or legacy charges yet.
                               </div>

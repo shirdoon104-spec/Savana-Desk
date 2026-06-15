@@ -474,6 +474,17 @@ export class FoliosController {
     const restaurantTableMap = new Map(
       restaurantTables.map((table) => [table.id, table]),
     );
+    const modernRestaurantOrderIds = new Set(
+      folio.lineItems
+        .filter(
+          (item) =>
+            item.type === "restaurant_charge" &&
+            item.sourceType === "restaurant_order" &&
+            item.sourceId &&
+            !item.voidedAt,
+        )
+        .map((item) => item.sourceId as string),
+    );
 
     return {
       balance: folio.balance.toString(),
@@ -542,6 +553,9 @@ export class FoliosController {
         id: charge.id,
         orderId: charge.orderId,
         restaurantId: charge.restaurantId,
+        supersededByLineItem: charge.orderId
+          ? modernRestaurantOrderIds.has(charge.orderId)
+          : false,
       })),
       openedAt: folio.openedAt,
       paymentTotal: paymentTotal.toString(),
