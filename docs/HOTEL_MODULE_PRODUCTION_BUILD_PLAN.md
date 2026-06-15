@@ -359,8 +359,8 @@ Goal: improve the existing restaurant charge-to-room workflow.
 - [x] Link restaurant order, order payment, and folio line item in the same transaction.
 - [x] Prevent duplicate room charge for the same restaurant order.
 - [x] Show room charge details on folio detail page.
-- [ ] Allow reversal only through an adjustment or refund workflow.
-- [ ] Add audit log for charge-to-room posting and reversal.
+- [x] Allow reversal only through an adjustment or refund workflow.
+- [x] Add audit log for charge-to-room posting and reversal.
 
 Posting rule:
 
@@ -378,6 +378,14 @@ under concurrent requests.
 Status as of 2026-06-15: folio detail line items now show restaurant
 charge-to-room source details, including the restaurant, table, source order,
 and order payment status when that source order is still available.
+
+Status as of 2026-06-15: folio line reversals are controlled through
+`POST /folios/:folioId/line-items/:lineItemId/reverse`. The workflow requires a
+reason, only works on open/pending checkout folios, voids the active line item,
+creates an append-only negative `FolioAdjustment`, updates the folio balance,
+and writes hotel audit logs. Restaurant charge-to-room reversals also mark the
+matching `room_charge` order payment as refunded when it can be linked and write
+a restaurant payment-refund audit log.
 
 ## Phase 6: Checkout and Settlement
 

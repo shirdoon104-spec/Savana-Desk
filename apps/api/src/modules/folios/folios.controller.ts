@@ -81,6 +81,12 @@ class PostFolioChargeDto {
   restaurantId!: string;
 }
 
+class ReverseFolioLineItemDto {
+  @IsString()
+  @MaxLength(240)
+  reason!: string;
+}
+
 type RecalculatedRoomChargeLine = {
   amount: Prisma.Decimal;
   currency: string;
@@ -737,6 +743,202 @@ export class FoliosController {
     });
   }
 
+  @Post("folios/:folioId/line-items/:lineItemId/reverse")
+  @RequirePermission("billing.manage")
+  async reverseLineItem(
+    @CurrentTenant() context: TenantContext,
+    @Param("folioId") folioId: string,
+    @Param("lineItemId") lineItemId: string,
+    @Body() body: ReverseFolioLineItemDto,
+  ) {
+    const reason = body.reason?.trim() ?? "";
+
+    if (reason.length < 3) {
+      throw new BadRequestException("Enter a reversal reason.");
+    }
+
+    const folio = await this.prisma.guestFolio.findFirst({
+      where: {
+        id: folioId,
+        status: { in: ["open", "pending_checkout"] },
+        tenantId: context.tenant.id,
+      },
+      include: {
+        lineItems: {
+          where: {
+            id: lineItemId,
+            tenantId: context.tenant.id,
+          },
+        },
+        stay: {
+          include: {
+            room: true,
+          },
+        },
+      },
+    });
+    const lineItem = folio?.lineItems[0];
+
+    if (!folio || !lineItem) {
+      throw new BadRequestException(
+        "Only active line items on open folios can be reversed.",
+      );
+    }
+
+    if (lineItem.voidedAt) {
+      throw new BadRequestException("This folio line item is already reversed.");
+    }
+
+    const reversalAmount = new Prisma.Decimal(lineItem.amount).negated();
+    const isRoomCharge =
+      lineItem.type === "restaurant_charge" &&
+      lineItem.sourceType === "restaurant_order" &&
+      Boolean(lineItem.sourceId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      await tx.folioLineItem.update({
+        where: { id: lineItem.id },
+        data: {
+          voidReason: reason,
+          voidedAt: now,
+          voidedById: context.tenantUser.clerkUserId,
+        },
+      });
+
+      const adjustment = await tx.folioAdjustment.create({
+        data: {
+          amount: reversalAmount,
+          authorizedById: context.tenantUser.clerkUserId,
+          createdById: context.tenantUser.clerkUserId,
+          currency: lineItem.currency,
+          folioId: folio.id,
+          lineItemId: lineItem.id,
+          propertyId: folio.propertyId,
+          reason,
+          status: "posted",
+          tenantId: context.tenant.id,
+        },
+      });
+
+      await tx.guestFolio.update({
+        where: { id: folio.id },
+        data: {
+          balance: { increment: reversalAmount },
+        },
+      });
+
+      let refundedPaymentId: string | null = null;
+
+      if (isRoomCharge && lineItem.sourceId) {
+        const folioCharge = await tx.folioCharge.findFirst({
+          where: {
+            folioId: folio.id,
+            orderId: lineItem.sourceId,
+            tenantId: context.tenant.id,
+          },
+        });
+        const payment = folioCharge
+          ? await tx.orderPayment.findFirst({
+              where: {
+                method: "room_charge",
+                orderId: lineItem.sourceId,
+                reference: folioCharge.id,
+                status: "confirmed",
+                tenantId: context.tenant.id,
+              },
+            })
+          : null;
+
+        if (payment) {
+          const refundedPayment = await tx.orderPayment.update({
+            where: { id: payment.id },
+            data: {
+              refundReason: reason,
+              refundedAt: now,
+              refundedById: context.tenantUser.id,
+              status: "refunded",
+            },
+          });
+          refundedPaymentId = refundedPayment.id;
+        }
+
+        await tx.order.updateMany({
+          where: {
+            id: lineItem.sourceId,
+            paymentStatus: "paid",
+            tenantId: context.tenant.id,
+          },
+          data: {
+            paymentStatus: "refunded",
+          },
+        });
+
+        if (folioCharge?.restaurantId) {
+          await tx.orderAuditLog.create({
+            data: {
+              actorId: context.tenantUser.id,
+              actorRole: context.role,
+              event: "payment_refunded",
+              newState: toPrismaJson({
+                adjustmentId: adjustment.id,
+                amount: lineItem.amount.toString(),
+                folioId: folio.id,
+                folioLineItemId: lineItem.id,
+                orderPaymentId: refundedPaymentId,
+                reason,
+              }),
+              orderId: lineItem.sourceId,
+              propertyId: folio.propertyId,
+              restaurantId: folioCharge.restaurantId,
+              tenantId: context.tenant.id,
+            },
+          });
+        }
+      }
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: isRoomCharge
+            ? "folio_charge_to_room_reversed"
+            : "folio_line_item_reversed",
+          newState: {
+            adjustmentAmount: reversalAmount.toString(),
+            adjustmentId: adjustment.id,
+            lineItemId: lineItem.id,
+            orderPaymentId: refundedPaymentId,
+            reason,
+            voidedAt: now.toISOString(),
+          },
+          previousState: {
+            amount: lineItem.amount.toString(),
+            description: lineItem.description,
+            sourceId: lineItem.sourceId,
+            sourceType: lineItem.sourceType,
+            type: lineItem.type,
+          },
+          propertyId: folio.propertyId,
+          reservationId: folio.stay.hotelReservationId,
+          roomId: folio.stay.roomId,
+          stayId: folio.stayId,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      return {
+        adjustmentId: adjustment.id,
+        amount: reversalAmount.toString(),
+        folioId: folio.id,
+        lineItemId: lineItem.id,
+        orderPaymentId: refundedPaymentId,
+        status: "reversed",
+      };
+    });
+  }
+
   @Post("folios/:folioId/charges")
   @RequirePermission("restaurant.read")
   async postCharge(
@@ -964,6 +1166,27 @@ export class FoliosController {
               tenantId: context.tenant.id,
             },
           ],
+        });
+
+        await tx.hotelAuditLog.create({
+          data: {
+            actorId: context.tenantUser.clerkUserId,
+            actorRole: context.role,
+            event: "folio_charge_to_room_posted",
+            newState: {
+              amount: amount.toString(),
+              folioChargeId: charge.id,
+              folioId: activeFolio?.id ?? stay.id,
+              folioLineItemId: lineItem?.id ?? null,
+              orderId: order.id,
+              restaurantId: order.restaurantId,
+              roomNumber: stay.room.number,
+            },
+            propertyId: order.propertyId,
+            roomId: stay.roomId,
+            stayId: stay.id,
+            tenantId: context.tenant.id,
+          },
         });
 
         return {

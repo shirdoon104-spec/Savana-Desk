@@ -450,6 +450,9 @@ enum HotelAuditEvent {
   check_in_completed
   check_out_completed
   folio_room_charges_recalculated
+  folio_charge_to_room_posted
+  folio_line_item_reversed
+  folio_charge_to_room_reversed
 }
 
 enum FolioStatus {
