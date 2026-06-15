@@ -344,6 +344,16 @@ function formatFolioLineMeta(
   return parts.filter(Boolean).join(" - ");
 }
 
+function formatFolioLineTitle(
+  item: FolioDetailResponse["lineItems"][number],
+) {
+  if (item.restaurantCharge) {
+    return "Restaurant order";
+  }
+
+  return item.description;
+}
+
 function formatRatePercent(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === "") {
     return "0";
@@ -1978,34 +1988,39 @@ export default function PropertiesPage() {
                         <div>
                           <h4>Line items</h4>
                           <div className="folio-row-list">
-                            {selectedFolio.lineItems.map((item) => (
-                              <div className="folio-row" key={item.id}>
-                                <div>
-                                  <strong>{item.description}</strong>
-                                  <span className="folio-row-meta">
-                                    {formatFolioLineMeta(item)}
-                                  </span>
-                                  {item.restaurantCharge ? (
-                                    <span className="folio-row-submeta">
-                                      {formatMoney(
-                                        item.restaurantCharge.totalAmount,
-                                        item.restaurantCharge.totalCurrency,
-                                      )}{" "}
-                                      restaurant order
-                                      {item.restaurantCharge.paymentStatus
-                                        ? ` - ${formatLabel(
-                                            item.restaurantCharge.paymentStatus,
-                                          )}`
-                                        : ""}
+                            {selectedFolio.lineItems
+                              .filter((item) => !item.voidedAt)
+                              .map((item) => (
+                                <div className="folio-row" key={item.id}>
+                                  <div>
+                                    <strong>{formatFolioLineTitle(item)}</strong>
+                                    <span className="folio-row-meta">
+                                      {formatFolioLineMeta(item)}
                                     </span>
-                                  ) : null}
+                                    {item.restaurantCharge ? (
+                                      <span className="folio-row-submeta">
+                                        {formatMoney(
+                                          item.restaurantCharge.totalAmount,
+                                          item.restaurantCharge.totalCurrency,
+                                        )}{" "}
+                                        restaurant order
+                                        {item.restaurantCharge.paymentStatus
+                                          ? ` - ${formatLabel(
+                                              item.restaurantCharge
+                                                .paymentStatus,
+                                            )}`
+                                          : ""}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <strong>
+                                    {formatMoney(item.amount, item.currency)}
+                                  </strong>
                                 </div>
-                                <strong>
-                                  {formatMoney(item.amount, item.currency)}
-                                </strong>
-                              </div>
-                            ))}
-                            {!selectedFolio.lineItems.length ? (
+                              ))}
+                            {!selectedFolio.lineItems.some(
+                              (item) => !item.voidedAt,
+                            ) ? (
                               <div className="empty-state">
                                 No folio line items yet.
                               </div>
