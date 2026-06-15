@@ -605,9 +605,9 @@ model FolioCharge {
   stay  Stay        @relation(fields: [stayId], references: [id])
   folio GuestFolio? @relation(fields: [folioId], references: [id])
 
+  @@unique([tenantId, orderId])
   @@index([tenantId, stayId, createdAt])
   @@index([tenantId, folioId])
-  @@index([tenantId, orderId])
 }
 
 model RestaurantTable {

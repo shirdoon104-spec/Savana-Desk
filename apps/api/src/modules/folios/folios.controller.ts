@@ -723,142 +723,163 @@ export class FoliosController {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const charge = await tx.folioCharge.create({
-        data: {
-          amount,
-          currency: order.currency,
-          description:
-            body.description?.trim() ||
-            `Restaurant charge for order ${order.id}`,
-          folioId: activeFolio?.id ?? null,
-          orderId: order.id,
-          postedById: context.tenantUser.id,
-          propertyId: order.propertyId,
-          restaurantId: order.restaurantId,
-          stayId: stay.id,
-          tenantId: context.tenant.id,
-        },
-      });
-
-      const lineItem = activeFolio
-        ? await tx.folioLineItem.create({
-            data: {
-              amount,
-              currency: order.currency,
-              description: charge.description,
-              folioId: activeFolio.id,
-              postedById: context.tenantUser.id,
-              propertyId: order.propertyId,
-              sourceId: order.id,
-              sourceType: "restaurant_order",
-              tenantId: context.tenant.id,
-              type: "restaurant_charge",
-              unitAmount: amount,
-            },
-          })
-        : null;
-
-      if (activeFolio) {
-        await tx.guestFolio.update({
-          where: { id: activeFolio.id },
-          data: { balance: { increment: amount } },
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const charge = await tx.folioCharge.create({
+          data: {
+            amount,
+            currency: order.currency,
+            description:
+              body.description?.trim() ||
+              `Restaurant charge for order ${order.id}`,
+            folioId: activeFolio?.id ?? null,
+            orderId: order.id,
+            postedById: context.tenantUser.id,
+            propertyId: order.propertyId,
+            restaurantId: order.restaurantId,
+            stayId: stay.id,
+            tenantId: context.tenant.id,
+          },
         });
-      }
 
-      await tx.orderPayment.create({
-        data: {
-          amount,
-          currency: order.currency,
-          method: "room_charge",
-          orderId: order.id,
-          paidAt: new Date(),
-          propertyId: order.propertyId,
-          recordedById: context.tenantUser.id,
-          reference: charge.id,
-          restaurantId: order.restaurantId,
-          status: "confirmed",
-          tenantId: context.tenant.id,
-        },
-      });
+        const lineItem = activeFolio
+          ? await tx.folioLineItem.create({
+              data: {
+                amount,
+                currency: order.currency,
+                description: charge.description,
+                folioId: activeFolio.id,
+                postedById: context.tenantUser.id,
+                propertyId: order.propertyId,
+                sourceId: order.id,
+                sourceType: "restaurant_order",
+                tenantId: context.tenant.id,
+                type: "restaurant_charge",
+                unitAmount: amount,
+              },
+            })
+          : null;
 
-      const updatedOrder = await tx.order.update({
-        where: { id: order.id },
-        data: {
-          closedAt: new Date(),
-          closedById: context.tenantUser.id,
-          paymentStatus: "paid",
-          status: "closed",
-        },
-      });
+        if (activeFolio) {
+          await tx.guestFolio.update({
+            where: { id: activeFolio.id },
+            data: { balance: { increment: amount } },
+          });
+        }
 
-      if (order.tableId) {
-        await tx.restaurantTable.update({
-          where: { id: order.tableId },
-          data: { status: "cleaning" },
-        });
-      }
-
-      await tx.orderAuditLog.createMany({
-        data: [
-          {
-            actorId: context.tenantUser.id,
-            actorRole: context.role,
-            event: "charge_to_room_posted",
-            newState: toPrismaJson({
-              amount: amount.toString(),
-              folioLineItemId: lineItem?.id ?? null,
+        await tx.orderPayment.create({
+          data: {
+            amount,
+            currency: order.currency,
+            method: "room_charge",
+            metadata: toPrismaJson({
               folioChargeId: charge.id,
-              folioId: activeFolio?.id ?? stay.id,
+              folioId: activeFolio?.id ?? null,
+              folioLineItemId: lineItem?.id ?? null,
               legacyStayFolioId: stay.id,
               roomNumber: stay.room.number,
             }),
             orderId: order.id,
+            paidAt: new Date(),
             propertyId: order.propertyId,
+            recordedById: context.tenantUser.id,
+            reference: charge.id,
             restaurantId: order.restaurantId,
+            status: "confirmed",
             tenantId: context.tenant.id,
           },
-          {
-            actorId: context.tenantUser.id,
-            actorRole: context.role,
-            event: "payment_confirmed",
-            newState: toPrismaJson({
-              amount: amount.toString(),
-              method: "room_charge",
-              reference: charge.id,
-            }),
-            orderId: order.id,
-            propertyId: order.propertyId,
-            restaurantId: order.restaurantId,
-            tenantId: context.tenant.id,
-          },
-          {
-            actorId: context.tenantUser.id,
-            actorRole: context.role,
-            event: "order_closed",
-            newState: toPrismaJson({
-              paymentStatus: updatedOrder.paymentStatus,
-              status: updatedOrder.status,
-            }),
-            orderId: order.id,
-            previousState: toPrismaJson({
-              paymentStatus: order.paymentStatus,
-              status: order.status,
-            }),
-            propertyId: order.propertyId,
-            restaurantId: order.restaurantId,
-            tenantId: context.tenant.id,
-          },
-        ],
-      });
+        });
 
-      return {
-        chargeId: charge.id,
-        folioId: activeFolio?.id ?? stay.id,
-        orderId: order.id,
-        status: "posted",
-      };
-    });
+        const updatedOrder = await tx.order.update({
+          where: { id: order.id },
+          data: {
+            closedAt: new Date(),
+            closedById: context.tenantUser.id,
+            paymentStatus: "paid",
+            status: "closed",
+          },
+        });
+
+        if (order.tableId) {
+          await tx.restaurantTable.update({
+            where: { id: order.tableId },
+            data: { status: "cleaning" },
+          });
+        }
+
+        await tx.orderAuditLog.createMany({
+          data: [
+            {
+              actorId: context.tenantUser.id,
+              actorRole: context.role,
+              event: "charge_to_room_posted",
+              newState: toPrismaJson({
+                amount: amount.toString(),
+                folioLineItemId: lineItem?.id ?? null,
+                folioChargeId: charge.id,
+                folioId: activeFolio?.id ?? stay.id,
+                legacyStayFolioId: stay.id,
+                roomNumber: stay.room.number,
+              }),
+              orderId: order.id,
+              propertyId: order.propertyId,
+              restaurantId: order.restaurantId,
+              tenantId: context.tenant.id,
+            },
+            {
+              actorId: context.tenantUser.id,
+              actorRole: context.role,
+              event: "payment_confirmed",
+              newState: toPrismaJson({
+                amount: amount.toString(),
+                method: "room_charge",
+                reference: charge.id,
+              }),
+              orderId: order.id,
+              propertyId: order.propertyId,
+              restaurantId: order.restaurantId,
+              tenantId: context.tenant.id,
+            },
+            {
+              actorId: context.tenantUser.id,
+              actorRole: context.role,
+              event: "order_closed",
+              newState: toPrismaJson({
+                paymentStatus: updatedOrder.paymentStatus,
+                status: updatedOrder.status,
+              }),
+              orderId: order.id,
+              previousState: toPrismaJson({
+                paymentStatus: order.paymentStatus,
+                status: order.status,
+              }),
+              propertyId: order.propertyId,
+              restaurantId: order.restaurantId,
+              tenantId: context.tenant.id,
+            },
+          ],
+        });
+
+        return {
+          chargeId: charge.id,
+          folioId: activeFolio?.id ?? stay.id,
+          folioLineItemId: lineItem?.id ?? null,
+          orderId: order.id,
+          status: "posted",
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new BadRequestException(
+          "This order has already been charged to a room.",
+        );
+      }
+
+      throw error;
+    }
   }
 
   private async confirmedOrderPaymentTotal(tenantId: string, orderId: string) {
