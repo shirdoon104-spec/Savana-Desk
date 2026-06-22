@@ -1749,6 +1749,14 @@ export class PropertiesController {
       );
     }
 
+    if (checkoutTotals.amountDue.greaterThan(0)) {
+      throw new BadRequestException(
+        `Settle the outstanding folio balance of ${
+          guestFolio?.currency ?? property.currency
+        } ${checkoutTotals.amountDue.toFixed(2)} before checkout.`,
+      );
+    }
+
     if (
       checkoutTotals.overpaidAmount.greaterThan(0) &&
       !body?.excessDepositAction

@@ -2024,6 +2024,16 @@ export default function PropertiesPage() {
                                 checkout closes.
                               </p>
                             ) : null}
+                            {Number(checkoutReview.preview.amountDue) > 0 ? (
+                              <p>
+                                Settle{" "}
+                                {formatMoney(
+                                  checkoutReview.preview.amountDue,
+                                  checkoutReview.preview.currency,
+                                )}{" "}
+                                before final checkout.
+                              </p>
+                            ) : null}
                             {checkoutReview.preview.extraNightCount > 0 ? (
                               <p>
                                 Includes{" "}
@@ -2050,7 +2060,10 @@ export default function PropertiesPage() {
                                 Cancel
                               </button>
                               <button
-                                disabled={isSubmitting}
+                                disabled={
+                                  isSubmitting ||
+                                  Number(checkoutReview.preview.amountDue) > 0
+                                }
                                 onClick={() => {
                                   const overpaidAmount = Number(
                                     checkoutReview.preview.overpaidAmount,
@@ -2074,7 +2087,10 @@ export default function PropertiesPage() {
                               {Number(checkoutReview.preview.overpaidAmount) >
                               0 ? (
                                 <button
-                                  disabled={isSubmitting}
+                                  disabled={
+                                    isSubmitting ||
+                                    Number(checkoutReview.preview.amountDue) > 0
+                                  }
                                   onClick={() =>
                                     checkOutGuest(room.id, true, "refund")
                                   }
