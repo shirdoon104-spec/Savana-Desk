@@ -1749,6 +1749,26 @@ export class PropertiesController {
       );
     }
 
+    const restaurantOrderIds = restaurantCharges
+      .map((charge) => charge.orderId)
+      .filter((orderId): orderId is string => Boolean(orderId));
+    const pendingRoomChargePaymentCount = restaurantOrderIds.length
+      ? await this.prisma.orderPayment.count({
+          where: {
+            method: "room_charge",
+            orderId: { in: restaurantOrderIds },
+            status: "pending",
+            tenantId: context.tenant.id,
+          },
+        })
+      : 0;
+
+    if (pendingRoomChargePaymentCount > 0) {
+      throw new BadRequestException(
+        "Resolve pending restaurant room-charge payments before checkout can lock the folio.",
+      );
+    }
+
     if (checkoutTotals.amountDue.greaterThan(0)) {
       throw new BadRequestException(
         `Settle the outstanding folio balance of ${
@@ -1871,7 +1891,8 @@ export class PropertiesController {
         data: {
           closedAt: completedStay.checkOutAt,
           closedByUserId: context.tenantUser.clerkUserId,
-          status: "closed",
+          lockedAt: completedStay.checkOutAt,
+          status: "locked",
         },
       });
 
@@ -1891,7 +1912,7 @@ export class PropertiesController {
             excessDepositAmount: checkoutTotals.overpaidAmount.greaterThan(0)
               ? checkoutTotals.overpaidAmount.toString()
               : null,
-            folioStatus: "closed",
+            folioStatus: "locked",
             roomStatus: "cleaning",
             stayStatus: completedStay.status,
           },

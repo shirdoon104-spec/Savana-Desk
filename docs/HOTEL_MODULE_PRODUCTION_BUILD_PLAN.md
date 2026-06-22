@@ -399,9 +399,9 @@ Goal: make checkout a controlled settlement process.
 - [x] Require settlement or authorized balance before final checkout.
 - [x] Allow partial payment with remaining balance only for approved account/corporate stays.
 - [x] Add explicit folio settlement payment methods.
-- [ ] Block folio lock if any pending restaurant room-charge payment exists.
-- [ ] Close and lock folio on checkout.
-- [ ] Update room to `cleaning`.
+- [x] Block folio lock if any pending restaurant room-charge payment exists.
+- [x] Close and lock folio on checkout.
+- [x] Update room to `cleaning`.
 - [ ] Generate customer invoice from closed folio.
 - [ ] Post revenue/payment records to finance ledger once finance module exists.
 - [ ] Add checkout receipt/print view.
@@ -465,6 +465,11 @@ Status as of 2026-06-23: corporate folios can be settled to company account by
 owner/admin/accountant roles only. The stay must come from a corporate
 reservation, and the settlement requires an approval note or reference before it
 is recorded as a confirmed folio payment.
+
+Status as of 2026-06-23: checkout now refuses to lock a folio while linked
+restaurant room-charge payments are pending. Successful checkout sets the folio
+to `locked`, records `closedAt` and `lockedAt`, and keeps the room transition to
+`cleaning`.
 
 ## Phase 7: Housekeeping and Maintenance
 
