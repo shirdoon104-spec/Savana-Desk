@@ -307,6 +307,7 @@ interface FolioDetailResponse {
 
 interface CheckoutPreviewResponse {
   adjustmentTotal: string | number;
+  amountDue: string | number;
   currency: string;
   depositTotal: string | number;
   extraNightChargeTotal: string | number;
@@ -321,6 +322,7 @@ interface CheckoutPreviewResponse {
   folioId: string | null;
   lineItemTotal: string | number;
   outstandingAmount: string | number;
+  overpaidAmount: string | number;
   paymentTotal: string | number;
   projectedChargeTotal: string | number;
   restaurantChargeCount: number;
@@ -331,6 +333,7 @@ interface CheckoutPreviewResponse {
   };
   roomNightTotal: string | number;
   serviceChargeTotal: string | number;
+  settlementCreditTotal: string | number;
   stay: {
     checkInAt: string;
     expectedCheckOutAt: string | null;
@@ -1965,10 +1968,20 @@ export default function PropertiesPage() {
                                 </strong>
                               </span>
                               <span>
-                                Outstanding
+                                Credit applied
                                 <strong>
                                   {formatMoney(
-                                    checkoutReview.preview.outstandingAmount,
+                                    checkoutReview.preview
+                                      .settlementCreditTotal,
+                                    checkoutReview.preview.currency,
+                                  )}
+                                </strong>
+                              </span>
+                              <span>
+                                Amount due
+                                <strong>
+                                  {formatMoney(
+                                    checkoutReview.preview.amountDue,
                                     checkoutReview.preview.currency,
                                   )}
                                 </strong>
@@ -1997,6 +2010,17 @@ export default function PropertiesPage() {
                               )}
                               .
                             </p>
+                            {Number(checkoutReview.preview.overpaidAmount) >
+                            0 ? (
+                              <p>
+                                Overpaid amount{" "}
+                                {formatMoney(
+                                  checkoutReview.preview.overpaidAmount,
+                                  checkoutReview.preview.currency,
+                                )}{" "}
+                                will need refund or carry-forward handling.
+                              </p>
+                            ) : null}
                             {checkoutReview.preview.extraNightCount > 0 ? (
                               <p>
                                 Includes{" "}

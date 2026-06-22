@@ -394,7 +394,7 @@ Goal: make checkout a controlled settlement process.
 
 - [x] Add checkout preview endpoint.
 - [x] Show folio balance, payments, deposits, taxes, and outstanding amount.
-- [ ] Apply deposits in checkout preview.
+- [x] Apply deposits in checkout preview.
 - [ ] Refund or carry forward excess deposits.
 - [ ] Require settlement or authorized balance before final checkout.
 - [ ] Allow partial payment with remaining balance only for approved account/corporate stays.
@@ -440,6 +440,11 @@ the same extra-night calculation as checkout and returns folio balance, active
 line total, payments, deposits, tax, service charge, restaurant room charges,
 adjustments, projected total, and outstanding amount. The property room card now
 loads this preview before final checkout confirmation.
+
+Status as of 2026-06-22: checkout preview applies deposits as settlement credit
+alongside confirmed folio payments. The preview excludes deposit line items from
+charge totals, reports total settlement credit, amount due, and overpaid amount
+so excess deposits can be handled by the later refund/carry-forward workflow.
 
 ## Phase 7: Housekeeping and Maintenance
 

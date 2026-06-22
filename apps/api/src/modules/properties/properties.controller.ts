@@ -1888,17 +1888,30 @@ export class PropertiesController {
       activeStay.guestFolio?.payments.filter(
         (payment) => payment.status === "confirmed",
       ) ?? [];
-    const lineItemTotal = this.sumFolioLineAmounts(activeLineItems);
+    const depositTotal = this.sumFolioLineAmounts(
+      activeLineItems.filter((item) => item.type === "deposit"),
+    );
+    const chargeLineItems = activeLineItems.filter(
+      (item) => item.type !== "deposit",
+    );
+    const lineItemTotal = this.sumFolioLineAmounts(chargeLineItems);
     const adjustmentTotal = this.sumFolioLineAmounts(postedAdjustments);
     const paymentTotal = this.sumFolioLineAmounts(confirmedPayments);
     const extraNightChargeTotal = this.sumFolioLineAmounts(extraNightLineItems);
     const projectedChargeTotal = lineItemTotal
       .plus(adjustmentTotal)
       .plus(extraNightChargeTotal);
-    const outstandingAmount = projectedChargeTotal.minus(paymentTotal);
+    const settlementCreditTotal = paymentTotal.plus(depositTotal);
+    const checkoutBalance = projectedChargeTotal.minus(settlementCreditTotal);
+    const amountDue = checkoutBalance.greaterThan(0)
+      ? checkoutBalance
+      : new Prisma.Decimal(0);
+    const overpaidAmount = checkoutBalance.lessThan(0)
+      ? checkoutBalance.negated()
+      : new Prisma.Decimal(0);
     const amountByType = (type: string) =>
       this.sumFolioLineAmounts(
-        activeLineItems.filter((item) => item.type === type),
+        chargeLineItems.filter((item) => item.type === type),
       );
     const extraAmountByType = (type: string) =>
       this.sumFolioLineAmounts(
@@ -1907,11 +1920,12 @@ export class PropertiesController {
 
     return {
       adjustmentTotal: adjustmentTotal.toString(),
+      amountDue: amountDue.toString(),
       currency:
         activeStay.guestFolio?.currency ??
         extraNightQuote?.currency ??
         property.currency,
-      depositTotal: amountByType("deposit").toString(),
+      depositTotal: depositTotal.toString(),
       extraNightChargeTotal: extraNightChargeTotal.toString(),
       extraNightCount: extraNightQuote?.nights ?? 0,
       extraNightLines: extraNightLineItems.map((lineItem) => ({
@@ -1923,7 +1937,8 @@ export class PropertiesController {
       folioBalance: activeStay.guestFolio?.balance.toString() ?? "0",
       folioId: activeStay.guestFolio?.id ?? null,
       lineItemTotal: lineItemTotal.toString(),
-      outstandingAmount: outstandingAmount.toString(),
+      outstandingAmount: amountDue.toString(),
+      overpaidAmount: overpaidAmount.toString(),
       paymentTotal: paymentTotal.toString(),
       projectedChargeTotal: projectedChargeTotal.toString(),
       restaurantChargeCount: activeLineItems.filter(
@@ -1940,6 +1955,7 @@ export class PropertiesController {
       serviceChargeTotal: amountByType("service_charge")
         .plus(extraAmountByType("service_charge"))
         .toString(),
+      settlementCreditTotal: settlementCreditTotal.toString(),
       stay: {
         checkInAt: activeStay.checkInAt,
         expectedCheckOutAt: activeStay.expectedCheckOutAt,
