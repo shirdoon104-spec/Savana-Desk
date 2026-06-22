@@ -395,7 +395,7 @@ Goal: make checkout a controlled settlement process.
 - [x] Add checkout preview endpoint.
 - [x] Show folio balance, payments, deposits, taxes, and outstanding amount.
 - [x] Apply deposits in checkout preview.
-- [ ] Refund or carry forward excess deposits.
+- [x] Refund or carry forward excess deposits.
 - [ ] Require settlement or authorized balance before final checkout.
 - [ ] Allow partial payment with remaining balance only for approved account/corporate stays.
 - [ ] Add explicit folio settlement payment methods.
@@ -445,6 +445,11 @@ Status as of 2026-06-22: checkout preview applies deposits as settlement credit
 alongside confirmed folio payments. The preview excludes deposit line items from
 charge totals, reports total settlement credit, amount due, and overpaid amount
 so excess deposits can be handled by the later refund/carry-forward workflow.
+
+Status as of 2026-06-22: checkout requires an explicit refund or carry-forward
+choice when deposits overpay the stay. The server posts an excess deposit refund
+folio line, reduces the folio balance, and records `folio_excess_deposit_settled`
+in the hotel audit log before closing the stay.
 
 ## Phase 7: Housekeeping and Maintenance
 

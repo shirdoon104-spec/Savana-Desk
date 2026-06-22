@@ -1381,6 +1381,7 @@ export default function PropertiesPage() {
   async function checkOutGuest(
     roomId: string,
     acknowledgeRestaurantCharges = false,
+    excessDepositAction?: "refund" | "carry_forward",
   ) {
     setIsSubmitting(true);
     setError(null);
@@ -1408,6 +1409,7 @@ export default function PropertiesPage() {
           ? JSON.stringify({
               acknowledgeExtraNightCharges: true,
               acknowledgeRestaurantCharges: true,
+              ...(excessDepositAction ? { excessDepositAction } : {}),
             })
           : undefined,
         headers: {
@@ -2018,7 +2020,8 @@ export default function PropertiesPage() {
                                   checkoutReview.preview.overpaidAmount,
                                   checkoutReview.preview.currency,
                                 )}{" "}
-                                will need refund or carry-forward handling.
+                                must be refunded or carried forward before
+                                checkout closes.
                               </p>
                             ) : null}
                             {checkoutReview.preview.extraNightCount > 0 ? (
@@ -2048,11 +2051,38 @@ export default function PropertiesPage() {
                               </button>
                               <button
                                 disabled={isSubmitting}
-                                onClick={() => checkOutGuest(room.id, true)}
+                                onClick={() => {
+                                  const overpaidAmount = Number(
+                                    checkoutReview.preview.overpaidAmount,
+                                  );
+
+                                  checkOutGuest(
+                                    room.id,
+                                    true,
+                                    overpaidAmount > 0
+                                      ? "carry_forward"
+                                      : undefined,
+                                  );
+                                }}
                                 type="button"
                               >
-                                Confirm checkout
+                                {Number(checkoutReview.preview.overpaidAmount) >
+                                0
+                                  ? "Carry forward and checkout"
+                                  : "Confirm checkout"}
                               </button>
+                              {Number(checkoutReview.preview.overpaidAmount) >
+                              0 ? (
+                                <button
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    checkOutGuest(room.id, true, "refund")
+                                  }
+                                  type="button"
+                                >
+                                  Refund and checkout
+                                </button>
+                              ) : null}
                             </div>
                           </div>
                         ) : null}

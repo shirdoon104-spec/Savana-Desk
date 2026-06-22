@@ -68,6 +68,7 @@ type RoomChargeLineItem = {
   type: "room_night" | "service_charge" | "tax";
   unitAmount: Prisma.Decimal;
 };
+type CheckoutDepositSettlementAction = "refund" | "carry_forward";
 
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   value === "" ? undefined : value;
@@ -361,6 +362,10 @@ class CheckOutDto {
   @IsOptional()
   @IsBoolean()
   acknowledgeRestaurantCharges?: boolean;
+
+  @IsOptional()
+  @IsIn(["refund", "carry_forward"])
+  excessDepositAction?: CheckoutDepositSettlementAction;
 }
 
 class RateLookupQueryDto {
@@ -1684,6 +1689,20 @@ export class PropertiesController {
         })
       : [];
     const extraNightChargeTotal = this.sumFolioLineAmounts(extraNightLineItems);
+    const guestFolio = await this.prisma.guestFolio.findUnique({
+      where: { stayId: activeStay.id },
+      include: {
+        adjustments: true,
+        lineItems: true,
+        payments: true,
+      },
+    });
+    const checkoutTotals = this.calculateCheckoutTotals({
+      adjustments: guestFolio?.adjustments ?? [],
+      extraNightLineItems,
+      lineItems: guestFolio?.lineItems ?? [],
+      payments: guestFolio?.payments ?? [],
+    });
 
     if (extraNightLineItems.length > 0 && !body?.acknowledgeExtraNightCharges) {
       throw new BadRequestException(
@@ -1730,11 +1749,18 @@ export class PropertiesController {
       );
     }
 
-    const stay = await this.prisma.$transaction(async (tx) => {
-      const guestFolio = await tx.guestFolio.findUnique({
-        where: { stayId: activeStay.id },
-      });
+    if (
+      checkoutTotals.overpaidAmount.greaterThan(0) &&
+      !body?.excessDepositAction
+    ) {
+      throw new BadRequestException(
+        `Choose whether to refund or carry forward the excess deposit amount of ${
+          guestFolio?.currency ?? property.currency
+        } ${checkoutTotals.overpaidAmount.toFixed(2)} before checkout.`,
+      );
+    }
 
+    const stay = await this.prisma.$transaction(async (tx) => {
       if (extraNightLineItems.length > 0 && guestFolio) {
         await tx.folioLineItem.createMany({
           data: extraNightLineItems.map((lineItem) => ({
@@ -1748,6 +1774,64 @@ export class PropertiesController {
           where: { id: guestFolio.id },
           data: {
             balance: { increment: extraNightChargeTotal },
+          },
+        });
+      }
+
+      if (
+        guestFolio &&
+        checkoutTotals.overpaidAmount.greaterThan(0) &&
+        body.excessDepositAction
+      ) {
+        const settlementDescription =
+          body.excessDepositAction === "refund"
+            ? "Excess deposit refund"
+            : "Excess deposit carry forward";
+
+        const settlementLineItem = await tx.folioLineItem.create({
+          data: {
+            amount: checkoutTotals.overpaidAmount.negated(),
+            currency: guestFolio.currency,
+            description: settlementDescription,
+            folioId: guestFolio.id,
+            postedById: context.tenantUser.clerkUserId,
+            propertyId,
+            quantity: new Prisma.Decimal(1),
+            sourceId: activeStay.id,
+            sourceType: "checkout",
+            tenantId: context.tenant.id,
+            type: "refund",
+            unitAmount: checkoutTotals.overpaidAmount.negated(),
+          },
+        });
+
+        await tx.guestFolio.update({
+          where: { id: guestFolio.id },
+          data: {
+            balance: { decrement: checkoutTotals.overpaidAmount },
+          },
+        });
+
+        await tx.hotelAuditLog.create({
+          data: {
+            actorId: context.tenantUser.clerkUserId,
+            actorRole: context.role,
+            event: "folio_excess_deposit_settled",
+            newState: {
+              action: body.excessDepositAction,
+              amount: checkoutTotals.overpaidAmount.toString(),
+              currency: guestFolio.currency,
+              folioId: guestFolio.id,
+              lineItemId: settlementLineItem.id,
+            },
+            previousState: {
+              folioBalance: guestFolio.balance.toString(),
+            },
+            propertyId,
+            reservationId: activeStay.hotelReservationId,
+            roomId: room.id,
+            stayId: activeStay.id,
+            tenantId: context.tenant.id,
           },
         });
       }
@@ -1795,6 +1879,10 @@ export class PropertiesController {
                 ? extraNightChargeTotal.toString()
                 : null,
             extraNightCount: extraNightQuote?.nights ?? 0,
+            excessDepositAction: body.excessDepositAction ?? null,
+            excessDepositAmount: checkoutTotals.overpaidAmount.greaterThan(0)
+              ? checkoutTotals.overpaidAmount.toString()
+              : null,
             folioStatus: "closed",
             roomStatus: "cleaning",
             stayStatus: completedStay.status,
@@ -1898,17 +1986,12 @@ export class PropertiesController {
     const adjustmentTotal = this.sumFolioLineAmounts(postedAdjustments);
     const paymentTotal = this.sumFolioLineAmounts(confirmedPayments);
     const extraNightChargeTotal = this.sumFolioLineAmounts(extraNightLineItems);
-    const projectedChargeTotal = lineItemTotal
-      .plus(adjustmentTotal)
-      .plus(extraNightChargeTotal);
-    const settlementCreditTotal = paymentTotal.plus(depositTotal);
-    const checkoutBalance = projectedChargeTotal.minus(settlementCreditTotal);
-    const amountDue = checkoutBalance.greaterThan(0)
-      ? checkoutBalance
-      : new Prisma.Decimal(0);
-    const overpaidAmount = checkoutBalance.lessThan(0)
-      ? checkoutBalance.negated()
-      : new Prisma.Decimal(0);
+    const checkoutTotals = this.calculateCheckoutTotals({
+      adjustments: activeStay.guestFolio?.adjustments ?? [],
+      extraNightLineItems,
+      lineItems: activeStay.guestFolio?.lineItems ?? [],
+      payments: activeStay.guestFolio?.payments ?? [],
+    });
     const amountByType = (type: string) =>
       this.sumFolioLineAmounts(
         chargeLineItems.filter((item) => item.type === type),
@@ -1920,7 +2003,7 @@ export class PropertiesController {
 
     return {
       adjustmentTotal: adjustmentTotal.toString(),
-      amountDue: amountDue.toString(),
+      amountDue: checkoutTotals.amountDue.toString(),
       currency:
         activeStay.guestFolio?.currency ??
         extraNightQuote?.currency ??
@@ -1937,10 +2020,10 @@ export class PropertiesController {
       folioBalance: activeStay.guestFolio?.balance.toString() ?? "0",
       folioId: activeStay.guestFolio?.id ?? null,
       lineItemTotal: lineItemTotal.toString(),
-      outstandingAmount: amountDue.toString(),
-      overpaidAmount: overpaidAmount.toString(),
+      outstandingAmount: checkoutTotals.amountDue.toString(),
+      overpaidAmount: checkoutTotals.overpaidAmount.toString(),
       paymentTotal: paymentTotal.toString(),
-      projectedChargeTotal: projectedChargeTotal.toString(),
+      projectedChargeTotal: checkoutTotals.projectedChargeTotal.toString(),
       restaurantChargeCount: activeLineItems.filter(
         (item) => item.type === "restaurant_charge",
       ).length,
@@ -1955,7 +2038,7 @@ export class PropertiesController {
       serviceChargeTotal: amountByType("service_charge")
         .plus(extraAmountByType("service_charge"))
         .toString(),
-      settlementCreditTotal: settlementCreditTotal.toString(),
+      settlementCreditTotal: checkoutTotals.settlementCreditTotal.toString(),
       stay: {
         checkInAt: activeStay.checkInAt,
         expectedCheckOutAt: activeStay.expectedCheckOutAt,
@@ -2520,6 +2603,56 @@ export class PropertiesController {
       (total, lineItem) => total.plus(lineItem.amount),
       new Prisma.Decimal(0),
     );
+  }
+
+  private calculateCheckoutTotals(input: {
+    adjustments: Array<{ amount: Prisma.Decimal; status: string }>;
+    extraNightLineItems: Array<{ amount: Prisma.Decimal }>;
+    lineItems: Array<{
+      amount: Prisma.Decimal;
+      type: string;
+      voidedAt: Date | null;
+    }>;
+    payments: Array<{ amount: Prisma.Decimal; status: string }>;
+  }) {
+    const activeLineItems = input.lineItems.filter((item) => !item.voidedAt);
+    const depositTotal = this.sumFolioLineAmounts(
+      activeLineItems.filter((item) => item.type === "deposit"),
+    );
+    const lineItemTotal = this.sumFolioLineAmounts(
+      activeLineItems.filter((item) => item.type !== "deposit"),
+    );
+    const adjustmentTotal = this.sumFolioLineAmounts(
+      input.adjustments.filter((adjustment) => adjustment.status === "posted"),
+    );
+    const paymentTotal = this.sumFolioLineAmounts(
+      input.payments.filter((payment) => payment.status === "confirmed"),
+    );
+    const extraNightChargeTotal = this.sumFolioLineAmounts(
+      input.extraNightLineItems,
+    );
+    const projectedChargeTotal = lineItemTotal
+      .plus(adjustmentTotal)
+      .plus(extraNightChargeTotal);
+    const settlementCreditTotal = paymentTotal.plus(depositTotal);
+    const checkoutBalance = projectedChargeTotal.minus(settlementCreditTotal);
+    const amountDue = checkoutBalance.greaterThan(0)
+      ? checkoutBalance
+      : new Prisma.Decimal(0);
+    const overpaidAmount = checkoutBalance.lessThan(0)
+      ? checkoutBalance.negated()
+      : new Prisma.Decimal(0);
+
+    return {
+      amountDue,
+      checkoutBalance,
+      depositTotal,
+      lineItemTotal,
+      overpaidAmount,
+      paymentTotal,
+      projectedChargeTotal,
+      settlementCreditTotal,
+    };
   }
 
   private roundMoney(value: Prisma.Decimal) {
