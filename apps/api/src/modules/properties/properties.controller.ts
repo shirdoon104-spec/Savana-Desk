@@ -1896,6 +1896,136 @@ export class PropertiesController {
         },
       });
 
+      let invoiceSummary: { id: string; invoiceNumber: string } | null = null;
+
+      if (guestFolio) {
+        const invoiceFolio = await tx.guestFolio.findUnique({
+          where: { id: guestFolio.id },
+          include: {
+            lineItems: true,
+            payments: true,
+          },
+        });
+
+        if (invoiceFolio) {
+          const activeInvoiceLines = invoiceFolio.lineItems.filter(
+            (lineItem) => !lineItem.voidedAt && lineItem.type !== "deposit",
+          );
+          const depositCredits = invoiceFolio.lineItems.filter(
+            (lineItem) => !lineItem.voidedAt && lineItem.type === "deposit",
+          );
+          const confirmedPayments = invoiceFolio.payments.filter(
+            (payment) => payment.status === "confirmed",
+          );
+          const lineItemTotal = this.sumFolioLineAmounts(activeInvoiceLines);
+          const paymentTotal = this.sumFolioLineAmounts([
+            ...confirmedPayments,
+            ...depositCredits,
+          ]);
+          const invoice = await tx.customerInvoice.create({
+            data: {
+              balance: lineItemTotal.minus(paymentTotal),
+              currency: invoiceFolio.currency,
+              folioId: invoiceFolio.id,
+              guestId: invoiceFolio.guestId,
+              invoiceNumber: this.buildCustomerInvoiceNumber(
+                checkedOutAt,
+                invoiceFolio.id,
+              ),
+              issuedAt: checkedOutAt,
+              issuedById: context.tenantUser.clerkUserId,
+              lineItemTotal,
+              paymentTotal,
+              propertyId,
+              stayId: completedStay.id,
+              tenantId: context.tenant.id,
+            },
+          });
+
+          if (activeInvoiceLines.length > 0) {
+            await tx.customerInvoiceLineItem.createMany({
+              data: activeInvoiceLines.map((lineItem) => ({
+                amount: lineItem.amount,
+                currency: lineItem.currency,
+                description: lineItem.description,
+                invoiceId: invoice.id,
+                propertyId,
+                quantity: lineItem.quantity,
+                sourceId: lineItem.sourceId,
+                sourceType: lineItem.sourceType,
+                tenantId: context.tenant.id,
+                type: lineItem.type,
+                unitAmount: lineItem.unitAmount,
+              })),
+            });
+          }
+
+          const invoicePayments = [
+            ...confirmedPayments.map((payment) => ({
+              amount: payment.amount,
+              currency: payment.currency,
+              method: payment.method,
+              paidAt: payment.paidAt,
+              reference: payment.reference,
+              sourceId: payment.id,
+            })),
+            ...depositCredits.map((deposit) => ({
+              amount: deposit.amount,
+              currency: deposit.currency,
+              method: "deposit_credit",
+              paidAt: deposit.createdAt,
+              reference: deposit.sourceId,
+              sourceId: deposit.id,
+            })),
+          ];
+
+          if (invoicePayments.length > 0) {
+            await tx.customerInvoicePayment.createMany({
+              data: invoicePayments.map((payment) => ({
+                amount: payment.amount,
+                currency: payment.currency,
+                invoiceId: invoice.id,
+                method: payment.method,
+                paidAt: payment.paidAt,
+                propertyId,
+                reference: payment.reference,
+                sourceId: payment.sourceId,
+                tenantId: context.tenant.id,
+              })),
+            });
+          }
+
+          await tx.hotelAuditLog.create({
+            data: {
+              actorId: context.tenantUser.clerkUserId,
+              actorRole: context.role,
+              event: "customer_invoice_generated",
+              newState: {
+                balance: invoice.balance.toString(),
+                invoiceId: invoice.id,
+                invoiceNumber: invoice.invoiceNumber,
+                lineItemTotal: invoice.lineItemTotal.toString(),
+                paymentTotal: invoice.paymentTotal.toString(),
+              },
+              previousState: {
+                folioId: invoiceFolio.id,
+                folioStatus: invoiceFolio.status,
+              },
+              propertyId,
+              reservationId: completedStay.hotelReservationId,
+              roomId: room.id,
+              stayId: completedStay.id,
+              tenantId: context.tenant.id,
+            },
+          });
+
+          invoiceSummary = {
+            id: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+          };
+        }
+      }
+
       await tx.hotelAuditLog.create({
         data: {
           actorId: context.tenantUser.clerkUserId,
@@ -1913,6 +2043,7 @@ export class PropertiesController {
               ? checkoutTotals.overpaidAmount.toString()
               : null,
             folioStatus: "locked",
+            invoice: invoiceSummary,
             roomStatus: "cleaning",
             stayStatus: completedStay.status,
           },
@@ -2632,6 +2763,13 @@ export class PropertiesController {
       (total, lineItem) => total.plus(lineItem.amount),
       new Prisma.Decimal(0),
     );
+  }
+
+  private buildCustomerInvoiceNumber(issuedAt: Date, folioId: string) {
+    const datePart = issuedAt.toISOString().slice(0, 10).replaceAll("-", "");
+    const folioPart = folioId.slice(-8).toUpperCase();
+
+    return `INV-${datePart}-${folioPart}`;
   }
 
   private calculateCheckoutTotals(input: {

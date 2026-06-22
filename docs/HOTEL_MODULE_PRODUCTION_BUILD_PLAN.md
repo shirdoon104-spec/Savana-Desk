@@ -402,7 +402,7 @@ Goal: make checkout a controlled settlement process.
 - [x] Block folio lock if any pending restaurant room-charge payment exists.
 - [x] Close and lock folio on checkout.
 - [x] Update room to `cleaning`.
-- [ ] Generate customer invoice from closed folio.
+- [x] Generate customer invoice from closed folio.
 - [ ] Post revenue/payment records to finance ledger once finance module exists.
 - [ ] Add checkout receipt/print view.
 
@@ -470,6 +470,11 @@ Status as of 2026-06-23: checkout now refuses to lock a folio while linked
 restaurant room-charge payments are pending. Successful checkout sets the folio
 to `locked`, records `closedAt` and `lockedAt`, and keeps the room transition to
 `cleaning`.
+
+Status as of 2026-06-23: checkout generates an issued customer invoice inside
+the same transaction that locks the folio. The invoice copies active non-deposit
+folio lines, confirmed folio payments, and deposit credits, then records a
+`customer_invoice_generated` audit event.
 
 ## Phase 7: Housekeeping and Maintenance
 
