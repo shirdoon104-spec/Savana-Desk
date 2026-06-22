@@ -1558,6 +1558,9 @@ export default function PropertiesPage() {
     }
 
     const amount = Number(folioPaymentAmount);
+    const currentFolioRoomId = selectedFolio?.room.id ?? null;
+    const previewRoomId =
+      checkoutReview?.roomId === currentFolioRoomId ? currentFolioRoomId : null;
 
     if (!Number.isFinite(amount) || amount <= 0) {
       setFolioPaymentError("Enter a payment amount greater than zero.");
@@ -1607,6 +1610,9 @@ export default function PropertiesPage() {
     setFolioPaymentNote("");
     await loadFolio(selectedFolioId);
     await loadProperties();
+    if (previewRoomId) {
+      await previewCheckout(previewRoomId);
+    }
   }
 
   async function reverseFolioLineItem(event: FormEvent<HTMLFormElement>) {
