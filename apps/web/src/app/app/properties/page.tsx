@@ -541,6 +541,13 @@ export default function PropertiesPage() {
   const [reverseLineItem, setReverseLineItem] = useState<
     FolioDetailResponse["lineItems"][number] | null
   >(null);
+  const [folioPaymentAmount, setFolioPaymentAmount] = useState("");
+  const [folioPaymentMethod, setFolioPaymentMethod] = useState("cash");
+  const [folioPaymentReference, setFolioPaymentReference] = useState("");
+  const [folioPaymentNote, setFolioPaymentNote] = useState("");
+  const [folioPaymentError, setFolioPaymentError] = useState<string | null>(
+    null,
+  );
   const [reverseReason, setReverseReason] = useState("");
   const [reverseError, setReverseError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1543,6 +1550,65 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
+  async function recordFolioPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedFolioId) {
+      return;
+    }
+
+    const amount = Number(folioPaymentAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFolioPaymentError("Enter a payment amount greater than zero.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFolioPaymentError(null);
+    setError(null);
+
+    const token = await getOrganizationToken();
+
+    if (!token) {
+      setFolioPaymentError("Choose a workspace before recording a payment.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/folios/${selectedFolioId}/payments`,
+      {
+        body: JSON.stringify({
+          amount,
+          method: folioPaymentMethod,
+          note: folioPaymentNote || undefined,
+          reference: folioPaymentReference || undefined,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      },
+    );
+
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setFolioPaymentError(
+        await readApiMessage(response, "Could not record folio payment."),
+      );
+      return;
+    }
+
+    setFolioPaymentAmount("");
+    setFolioPaymentReference("");
+    setFolioPaymentNote("");
+    await loadFolio(selectedFolioId);
+    await loadProperties();
+  }
+
   async function reverseFolioLineItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -2257,6 +2323,75 @@ export default function PropertiesPage() {
                           </strong>
                         </div>
                       </div>
+
+                      {data?.canManageBilling &&
+                      ["open", "pending_checkout"].includes(
+                        selectedFolio.status,
+                      ) ? (
+                        <form
+                          className="check-in-form"
+                          onSubmit={recordFolioPayment}
+                        >
+                          <label>
+                            Payment amount
+                            <input
+                              min="0.01"
+                              onChange={(event) =>
+                                setFolioPaymentAmount(event.target.value)
+                              }
+                              placeholder={`0.00 ${selectedFolio.currency}`}
+                              required
+                              step="0.01"
+                              type="number"
+                              value={folioPaymentAmount}
+                            />
+                          </label>
+                          <label>
+                            Method
+                            <select
+                              onChange={(event) =>
+                                setFolioPaymentMethod(event.target.value)
+                              }
+                              value={folioPaymentMethod}
+                            >
+                              <option value="cash">Cash</option>
+                              <option value="card">Card</option>
+                              <option value="mobile_money">Mobile money</option>
+                              <option value="bank_transfer">
+                                Bank transfer
+                              </option>
+                              <option value="voucher">Voucher</option>
+                              <option value="comp">Comp</option>
+                            </select>
+                          </label>
+                          <label>
+                            Reference
+                            <input
+                              onChange={(event) =>
+                                setFolioPaymentReference(event.target.value)
+                              }
+                              placeholder="Receipt, transaction, or approval"
+                              value={folioPaymentReference}
+                            />
+                          </label>
+                          <label>
+                            Note
+                            <input
+                              onChange={(event) =>
+                                setFolioPaymentNote(event.target.value)
+                              }
+                              placeholder="Optional note"
+                              value={folioPaymentNote}
+                            />
+                          </label>
+                          {folioPaymentError ? (
+                            <p className="error-text">{folioPaymentError}</p>
+                          ) : null}
+                          <button disabled={isSubmitting} type="submit">
+                            Record payment
+                          </button>
+                        </form>
+                      ) : null}
 
                       <div className="folio-detail-grid">
                         <div>

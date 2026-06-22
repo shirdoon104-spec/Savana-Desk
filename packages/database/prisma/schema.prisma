@@ -454,6 +454,7 @@ enum HotelAuditEvent {
   folio_line_item_reversed
   folio_charge_to_room_reversed
   folio_excess_deposit_settled
+  folio_payment_recorded
 }
 
 enum FolioStatus {

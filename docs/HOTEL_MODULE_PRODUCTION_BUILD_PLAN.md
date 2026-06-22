@@ -398,7 +398,7 @@ Goal: make checkout a controlled settlement process.
 - [x] Refund or carry forward excess deposits.
 - [x] Require settlement or authorized balance before final checkout.
 - [ ] Allow partial payment with remaining balance only for approved account/corporate stays.
-- [ ] Add explicit folio settlement payment methods.
+- [x] Add explicit folio settlement payment methods.
 - [ ] Block folio lock if any pending restaurant room-charge payment exists.
 - [ ] Close and lock folio on checkout.
 - [ ] Update room to `cleaning`.
@@ -455,6 +455,11 @@ Status as of 2026-06-23: checkout blocks final close when the previewed amount
 due is greater than zero. Authorized-balance/corporate exceptions are still
 reserved for the later company-account workflow, so the current production path
 requires ordinary settlement before checkout.
+
+Status as of 2026-06-23: open folios can record confirmed settlement payments
+from the property folio UI using cash, card, mobile money, bank transfer,
+voucher, or comp. Recording a payment decrements the folio balance and writes a
+`folio_payment_recorded` hotel audit log.
 
 ## Phase 7: Housekeeping and Maintenance
 

@@ -12,6 +12,7 @@ import {
 import { Type } from "class-transformer";
 import {
   IsDateString,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -85,6 +86,38 @@ class ReverseFolioLineItemDto {
   @IsString()
   @MaxLength(240)
   reason!: string;
+}
+
+const folioSettlementPaymentMethods = [
+  "cash",
+  "card",
+  "mobile_money",
+  "bank_transfer",
+  "voucher",
+  "comp",
+] as const;
+
+type FolioSettlementPaymentMethod =
+  (typeof folioSettlementPaymentMethods)[number];
+
+class RecordFolioPaymentDto {
+  @IsNumber()
+  @Min(0.01)
+  @Type(() => Number)
+  amount!: number;
+
+  @IsIn(folioSettlementPaymentMethods)
+  method!: FolioSettlementPaymentMethod;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  note?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
 }
 
 type RecalculatedRoomChargeLine = {
@@ -601,6 +634,108 @@ export class FoliosController {
         id: folio.stay.id,
         status: folio.stay.status,
       },
+    };
+  }
+
+  @Post("folios/:folioId/payments")
+  @RequirePermission("billing.manage")
+  async recordFolioPayment(
+    @CurrentTenant() context: TenantContext,
+    @Param("folioId") folioId: string,
+    @Body() body: RecordFolioPaymentDto,
+  ): Promise<Record<string, unknown>> {
+    const amount = new Prisma.Decimal(body.amount);
+    const reference = body.reference?.trim() || null;
+    const note = body.note?.trim() || null;
+
+    if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
+      throw new BadRequestException(
+        "Payment amount must be greater than zero.",
+      );
+    }
+
+    const folio = await this.prisma.guestFolio.findFirst({
+      where: {
+        id: folioId,
+        status: { in: ["open", "pending_checkout"] },
+        tenantId: context.tenant.id,
+      },
+      include: {
+        stay: {
+          include: {
+            room: true,
+          },
+        },
+      },
+    });
+
+    if (!folio) {
+      throw new BadRequestException(
+        "Only open guest folios can record payments.",
+      );
+    }
+
+    const payment = await this.prisma.$transaction(async (tx) => {
+      const createdPayment = await tx.folioPayment.create({
+        data: {
+          amount,
+          currency: folio.currency,
+          folioId: folio.id,
+          method: body.method,
+          metadata: note ? toPrismaJson({ note }) : undefined,
+          paidAt: new Date(),
+          propertyId: folio.propertyId,
+          recordedById: context.tenantUser.id,
+          reference,
+          status: "confirmed",
+          tenantId: context.tenant.id,
+        },
+      });
+
+      await tx.guestFolio.update({
+        where: { id: folio.id },
+        data: {
+          balance: { decrement: amount },
+        },
+      });
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: "folio_payment_recorded",
+          newState: {
+            amount: amount.toString(),
+            currency: folio.currency,
+            folioId: folio.id,
+            method: body.method,
+            note,
+            paymentId: createdPayment.id,
+            reference,
+          },
+          previousState: {
+            folioBalance: folio.balance.toString(),
+          },
+          propertyId: folio.propertyId,
+          reservationId: folio.stay.hotelReservationId,
+          roomId: folio.stay.roomId,
+          stayId: folio.stayId,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      return createdPayment;
+    });
+
+    return {
+      amount: payment.amount.toString(),
+      currency: payment.currency,
+      folioId: payment.folioId,
+      id: payment.id,
+      method: payment.method,
+      paidAt: payment.paidAt,
+      reference: payment.reference,
+      status: payment.status,
     };
   }
 
