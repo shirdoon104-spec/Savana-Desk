@@ -301,6 +301,7 @@ interface FolioDetailResponse {
     checkOutAt: string | null;
     expectedCheckOutAt: string | null;
     id: string;
+    reservationSource: string | null;
     status: string;
   };
 }
@@ -1561,9 +1562,21 @@ export default function PropertiesPage() {
     const currentFolioRoomId = selectedFolio?.room.id ?? null;
     const previewRoomId =
       checkoutReview?.roomId === currentFolioRoomId ? currentFolioRoomId : null;
+    const isCompanyAccountSettlement = folioPaymentMethod === "company_account";
 
     if (!Number.isFinite(amount) || amount <= 0) {
       setFolioPaymentError("Enter a payment amount greater than zero.");
+      return;
+    }
+
+    if (
+      isCompanyAccountSettlement &&
+      !folioPaymentReference.trim() &&
+      !folioPaymentNote.trim()
+    ) {
+      setFolioPaymentError(
+        "Company account settlement requires an approval note or reference.",
+      );
       return;
     }
 
@@ -2368,6 +2381,15 @@ export default function PropertiesPage() {
                               </option>
                               <option value="voucher">Voucher</option>
                               <option value="comp">Comp</option>
+                              {["owner", "admin", "accountant"].includes(
+                                data.currentUser.role,
+                              ) &&
+                              selectedFolio.stay.reservationSource ===
+                                "corporate" ? (
+                                <option value="company_account">
+                                  Company account
+                                </option>
+                              ) : null}
                             </select>
                           </label>
                           <label>

@@ -95,6 +95,7 @@ const folioSettlementPaymentMethods = [
   "bank_transfer",
   "voucher",
   "comp",
+  "company_account",
 ] as const;
 
 type FolioSettlementPaymentMethod =
@@ -409,6 +410,7 @@ export class FoliosController {
           property: true,
           stay: {
             include: {
+              hotelReservation: true,
               room: true,
             },
           },
@@ -436,6 +438,7 @@ export class FoliosController {
           property: true,
           stay: {
             include: {
+              hotelReservation: true,
               room: true,
             },
           },
@@ -631,6 +634,7 @@ export class FoliosController {
         checkInAt: folio.stay.checkInAt,
         checkOutAt: folio.stay.checkOutAt,
         expectedCheckOutAt: folio.stay.expectedCheckOutAt,
+        reservationSource: folio.stay.hotelReservation?.source ?? null,
         id: folio.stay.id,
         status: folio.stay.status,
       },
@@ -663,6 +667,7 @@ export class FoliosController {
       include: {
         stay: {
           include: {
+            hotelReservation: true,
             room: true,
           },
         },
@@ -673,6 +678,32 @@ export class FoliosController {
       throw new BadRequestException(
         "Only open guest folios can record payments.",
       );
+    }
+
+    if (body.method === "company_account") {
+      const canAuthorizeCompanyAccount = [
+        "owner",
+        "admin",
+        "accountant",
+      ].includes(context.role);
+
+      if (!canAuthorizeCompanyAccount) {
+        throw new BadRequestException(
+          "Only an owner, admin, or accountant can authorize company account settlement.",
+        );
+      }
+
+      if (folio.stay.hotelReservation?.source !== "corporate") {
+        throw new BadRequestException(
+          "Company account settlement is only available for corporate stays.",
+        );
+      }
+
+      if (!note && !reference) {
+        throw new BadRequestException(
+          "Company account settlement requires an approval note or reference.",
+        );
+      }
     }
 
     const payment = await this.prisma.$transaction(async (tx) => {
