@@ -57,6 +57,14 @@ type HotelReservationSource =
   | "direct"
   | "ota"
   | "corporate";
+const housekeepingTaskStatuses = [
+  "open",
+  "in_progress",
+  "done",
+  "inspected",
+  "cancelled",
+] as const;
+type HousekeepingTaskStatus = (typeof housekeepingTaskStatuses)[number];
 type RoomChargeLineItem = {
   amount: Prisma.Decimal;
   currency: string;
@@ -312,6 +320,21 @@ class UpdateRoomStatusDto {
   status!: RoomStatus;
 }
 
+class UpdateHousekeepingTaskDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  assignedUserId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  notes?: string;
+
+  @IsIn(housekeepingTaskStatuses)
+  status!: HousekeepingTaskStatus;
+}
+
 class CheckInDto {
   @IsOptional()
   @Transform(emptyToUndefined)
@@ -539,6 +562,17 @@ export class PropertiesController {
           orderBy: [{ arrivalDate: "asc" }, { createdAt: "desc" }],
           take: 60,
         },
+        housekeepingTasks: {
+          include: {
+            room: true,
+          },
+          orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+          where: {
+            status: {
+              in: ["open", "in_progress", "done"],
+            },
+          },
+        },
         roomTypes: {
           orderBy: [{ isActive: "desc" }, { name: "asc" }],
         },
@@ -596,6 +630,29 @@ export class PropertiesController {
           id: restaurant.id,
           name: restaurant.name,
           serviceStyle: restaurant.serviceStyle,
+        })),
+        housekeepingTasks: property.housekeepingTasks.map((task) => ({
+          assignedUserId: task.assignedUserId,
+          completedAt: task.completedAt,
+          completedByUserId: task.completedByUserId,
+          createdAt: task.createdAt,
+          createdByUserId: task.createdByUserId,
+          id: task.id,
+          inspectedAt: task.inspectedAt,
+          inspectedByUserId: task.inspectedByUserId,
+          notes: task.notes,
+          priority: task.priority,
+          reason: task.reason,
+          room: {
+            id: task.room.id,
+            number: task.room.number,
+            status: task.room.status,
+            type: task.room.type,
+          },
+          roomId: task.roomId,
+          status: task.status,
+          stayId: task.stayId,
+          type: task.type,
         })),
         hotelReservations: property.hotelReservations.map((reservation) => ({
           adultCount: reservation.adultCount,
@@ -1882,6 +1939,43 @@ export class PropertiesController {
         data: { status: "cleaning" },
       });
 
+      const housekeepingTask = await tx.housekeepingTask.create({
+        data: {
+          createdByUserId: context.tenantUser.clerkUserId,
+          priority: "normal",
+          propertyId,
+          reason: "Checkout cleaning",
+          roomId: room.id,
+          stayId: completedStay.id,
+          status: "open",
+          tenantId: context.tenant.id,
+          type: "cleaning",
+        },
+      });
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: "housekeeping_task_created",
+          newState: {
+            priority: housekeepingTask.priority,
+            reason: housekeepingTask.reason,
+            status: housekeepingTask.status,
+            taskId: housekeepingTask.id,
+            type: housekeepingTask.type,
+          },
+          previousState: {
+            roomStatus: room.status,
+          },
+          propertyId,
+          reservationId: completedStay.hotelReservationId,
+          roomId: room.id,
+          stayId: completedStay.id,
+          tenantId: context.tenant.id,
+        },
+      });
+
       await tx.guestFolio.updateMany({
         where: {
           stayId: completedStay.id,
@@ -2287,6 +2381,112 @@ export class PropertiesController {
       });
 
       return updatedRoom;
+    });
+  }
+
+  @Patch(":propertyId/housekeeping-tasks/:taskId")
+  @RequirePermission("rooms.read")
+  async updateHousekeepingTask(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("taskId") taskId: string,
+    @Body() body: UpdateHousekeepingTaskDto,
+  ): Promise<unknown> {
+    await this.findTenantProperty(context.tenant.id, propertyId);
+
+    const task = await this.prisma.housekeepingTask.findFirst({
+      where: {
+        id: taskId,
+        propertyId,
+        tenantId: context.tenant.id,
+      },
+      include: {
+        room: true,
+      },
+    });
+
+    if (!task) {
+      throw new BadRequestException(
+        "Housekeeping task was not found for this property.",
+      );
+    }
+
+    const canInspectOrCancel = hasTenantPermission(
+      context.role,
+      "property.manage",
+    );
+
+    if (
+      ["inspected", "cancelled"].includes(body.status) &&
+      !canInspectOrCancel
+    ) {
+      throw new BadRequestException(
+        "Only a supervisor or manager can inspect or cancel housekeeping tasks.",
+      );
+    }
+
+    const now = new Date();
+    const nextRoomStatus =
+      body.status === "inspected" ? "available" : task.room.status;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updatedTask = await tx.housekeepingTask.update({
+        where: { id: task.id },
+        data: {
+          assignedUserId: body.assignedUserId ?? task.assignedUserId,
+          completedAt:
+            body.status === "done" && !task.completedAt
+              ? now
+              : task.completedAt,
+          completedByUserId:
+            body.status === "done" && !task.completedByUserId
+              ? context.tenantUser.clerkUserId
+              : task.completedByUserId,
+          inspectedAt:
+            body.status === "inspected" && !task.inspectedAt
+              ? now
+              : task.inspectedAt,
+          inspectedByUserId:
+            body.status === "inspected" && !task.inspectedByUserId
+              ? context.tenantUser.clerkUserId
+              : task.inspectedByUserId,
+          notes: body.notes ?? task.notes,
+          status: body.status,
+        },
+        include: {
+          room: true,
+        },
+      });
+
+      if (nextRoomStatus !== task.room.status) {
+        await tx.room.update({
+          where: { id: task.roomId },
+          data: { status: nextRoomStatus },
+        });
+      }
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: "housekeeping_task_updated",
+          newState: {
+            roomStatus: nextRoomStatus,
+            status: updatedTask.status,
+            taskId: updatedTask.id,
+          },
+          previousState: {
+            roomStatus: task.room.status,
+            status: task.status,
+          },
+          propertyId,
+          roomId: task.roomId,
+          stayId: task.stayId,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      return updatedTask;
     });
   }
 

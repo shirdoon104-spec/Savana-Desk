@@ -8,22 +8,23 @@ datasource db {
 }
 
 model Tenant {
-  id                    String            @id @default(cuid())
+  id                    String             @id @default(cuid())
   name                  String
-  slug                  String            @unique
-  clerkOrgId            String            @unique
-  operatingModel        String            @default("hotel_restaurant")
+  slug                  String             @unique
+  clerkOrgId            String             @unique
+  operatingModel        String             @default("hotel_restaurant")
   mobileMoneyProvider   String?
   onboardingCompletedAt DateTime?
-  status                String            @default("active")
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  status                String             @default("active")
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
   properties            Property[]
   users                 TenantUser[]
   stays                 Stay[]
   guestFolios           GuestFolio[]
   customerInvoices      CustomerInvoice[]
   hotelAuditLogs        HotelAuditLog[]
+  housekeepingTasks     HousekeepingTask[]
   staffInvitations      StaffInvitation[]
 }
 
@@ -63,33 +64,34 @@ model StaffInvitation {
 }
 
 model Property {
-  id                String             @id @default(cuid())
-  tenantId          String
-  name              String
-  city              String?
-  roomCount         Int?
-  timezone          String             @default("Africa/Mogadishu")
-  currency          String             @default("USD")
-  taxRate           Decimal?
-  serviceChargeRate Decimal?
+  id                     String             @id @default(cuid())
+  tenantId               String
+  name                   String
+  city                   String?
+  roomCount              Int?
+  timezone               String             @default("Africa/Mogadishu")
+  currency               String             @default("USD")
+  taxRate                Decimal?
+  serviceChargeRate      Decimal?
   earlyCheckInBeforeTime String?
   earlyCheckInFeeType    String             @default("none")
   earlyCheckInFeeValue   Decimal            @default(0)
   lateCheckoutAfterTime  String?
   lateCheckoutFeeType    String             @default("none")
   lateCheckoutFeeValue   Decimal            @default(0)
-  tenant            Tenant             @relation(fields: [tenantId], references: [id])
-  rooms             Room[]
-  roomTypes         RoomType[]
-  ratePlans         RatePlan[]
-  stays             Stay[]
-  guestFolios       GuestFolio[]
-  customerInvoices   CustomerInvoice[]
-  hotelAuditLogs    HotelAuditLog[]
-  hotelReservations HotelReservation[]
-  restaurants       Restaurant[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  tenant                 Tenant             @relation(fields: [tenantId], references: [id])
+  rooms                  Room[]
+  roomTypes              RoomType[]
+  ratePlans              RatePlan[]
+  stays                  Stay[]
+  guestFolios            GuestFolio[]
+  customerInvoices       CustomerInvoice[]
+  hotelAuditLogs         HotelAuditLog[]
+  hotelReservations      HotelReservation[]
+  housekeepingTasks      HousekeepingTask[]
+  restaurants            Restaurant[]
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   @@index([tenantId])
 }
@@ -145,6 +147,7 @@ model Room {
   stays             Stay[]
   hotelAuditLogs    HotelAuditLog[]
   hotelReservations HotelReservation[]
+  housekeepingTasks HousekeepingTask[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -459,6 +462,56 @@ enum HotelAuditEvent {
   folio_excess_deposit_settled
   folio_payment_recorded
   customer_invoice_generated
+  housekeeping_task_created
+  housekeeping_task_updated
+}
+
+model HousekeepingTask {
+  id                String                 @id @default(cuid())
+  tenantId          String
+  propertyId        String
+  roomId            String
+  stayId            String?
+  type              HousekeepingTaskType   @default(cleaning)
+  status            HousekeepingTaskStatus @default(open)
+  priority          HousekeepingPriority   @default(normal)
+  reason            String?
+  assignedUserId    String?
+  createdByUserId   String?
+  completedByUserId String?
+  completedAt       DateTime?
+  inspectedByUserId String?
+  inspectedAt       DateTime?
+  notes             String?
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id])
+  property          Property               @relation(fields: [propertyId], references: [id])
+  room              Room                   @relation(fields: [roomId], references: [id])
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([tenantId, propertyId, status])
+  @@index([tenantId, roomId, status])
+  @@index([tenantId, stayId])
+}
+
+enum HousekeepingTaskType {
+  cleaning
+  inspection
+}
+
+enum HousekeepingTaskStatus {
+  open
+  in_progress
+  done
+  inspected
+  cancelled
+}
+
+enum HousekeepingPriority {
+  low
+  normal
+  high
+  urgent
 }
 
 enum InvoiceStatus {
@@ -626,31 +679,31 @@ model FolioCharge {
 }
 
 model CustomerInvoice {
-  id              String                    @id @default(cuid())
-  tenantId        String
-  propertyId      String
-  folioId         String                    @unique
-  stayId          String
-  guestId         String
-  invoiceNumber   String
-  status          InvoiceStatus             @default(issued)
-  currency        String
-  lineItemTotal   Decimal                   @default(0)
-  paymentTotal    Decimal                   @default(0)
-  balance         Decimal                   @default(0)
-  issuedAt        DateTime                  @default(now())
-  issuedById      String?
-  voidedAt        DateTime?
-  voidedById      String?
-  voidReason      String?
-  tenant          Tenant                    @relation(fields: [tenantId], references: [id])
-  property        Property                  @relation(fields: [propertyId], references: [id])
-  folio           GuestFolio                @relation(fields: [folioId], references: [id])
-  guest           Guest                     @relation(fields: [guestId], references: [id])
-  lineItems       CustomerInvoiceLineItem[]
-  payments        CustomerInvoicePayment[]
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
+  id            String                    @id @default(cuid())
+  tenantId      String
+  propertyId    String
+  folioId       String                    @unique
+  stayId        String
+  guestId       String
+  invoiceNumber String
+  status        InvoiceStatus             @default(issued)
+  currency      String
+  lineItemTotal Decimal                   @default(0)
+  paymentTotal  Decimal                   @default(0)
+  balance       Decimal                   @default(0)
+  issuedAt      DateTime                  @default(now())
+  issuedById    String?
+  voidedAt      DateTime?
+  voidedById    String?
+  voidReason    String?
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id])
+  property      Property                  @relation(fields: [propertyId], references: [id])
+  folio         GuestFolio                @relation(fields: [folioId], references: [id])
+  guest         Guest                     @relation(fields: [guestId], references: [id])
+  lineItems     CustomerInvoiceLineItem[]
+  payments      CustomerInvoicePayment[]
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
 
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId, propertyId, issuedAt])
@@ -678,18 +731,18 @@ model CustomerInvoiceLineItem {
 }
 
 model CustomerInvoicePayment {
-  id          String          @id @default(cuid())
-  tenantId    String
-  propertyId  String
-  invoiceId   String
-  method      String
-  amount      Decimal
-  currency    String
-  reference   String?
-  paidAt      DateTime?
-  sourceId    String?
-  invoice     CustomerInvoice @relation(fields: [invoiceId], references: [id])
-  createdAt   DateTime        @default(now())
+  id         String          @id @default(cuid())
+  tenantId   String
+  propertyId String
+  invoiceId  String
+  method     String
+  amount     Decimal
+  currency   String
+  reference  String?
+  paidAt     DateTime?
+  sourceId   String?
+  invoice    CustomerInvoice @relation(fields: [invoiceId], references: [id])
+  createdAt  DateTime        @default(now())
 
   @@index([tenantId, propertyId, invoiceId, createdAt])
 }

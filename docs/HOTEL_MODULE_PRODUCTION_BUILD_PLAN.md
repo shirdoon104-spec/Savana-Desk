@@ -484,16 +484,22 @@ invoice number, guest, room, charges, payments/credits, and balance.
 
 Goal: make room status operationally useful for staff.
 
-- [ ] Add housekeeping task model.
-- [ ] Auto-create cleaning task after checkout.
-- [ ] Add room inspection status.
+- [x] Add housekeeping task model.
+- [x] Auto-create cleaning task after checkout.
+- [x] Add room inspection status.
 - [ ] Add maintenance request model.
-- [ ] Allow housekeeping to mark room clean.
-- [ ] Allow supervisor/admin to inspect and release room.
+- [x] Allow housekeeping to mark room clean.
+- [x] Allow supervisor/admin to inspect and release room.
 - [ ] Allow maintenance to mark room out of order.
 - [ ] Track reason, assigned user, priority, and resolution notes.
-- [ ] Add housekeeping board UI.
+- [x] Add housekeeping board UI.
 - [ ] Add maintenance board UI.
+
+Status as of 2026-06-23: first housekeeping slice is implemented. Checkout now
+creates an open cleaning task when a room moves to `cleaning`. The property
+workspace includes a housekeeping board with open, in-progress, and ready-to-
+inspect task counts. Housekeeping can start and mark tasks done, while managers
+can inspect and release the room back to `available`.
 
 Housekeeping statuses:
 

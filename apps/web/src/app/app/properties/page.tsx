@@ -21,6 +21,7 @@ type HotelWorkspaceTab =
   | "overview"
   | "rooms"
   | "reservations"
+  | "housekeeping"
   | "rates"
   | "setup";
 type RateWorkspaceTab = "quote" | "create" | "lists";
@@ -44,6 +45,11 @@ const hotelWorkspaceTabs: Array<{
     id: "reservations",
     label: "Reservations",
     description: "Arrival book",
+  },
+  {
+    id: "housekeeping",
+    label: "Housekeeping",
+    description: "Room turn",
   },
   {
     id: "rates",
@@ -121,6 +127,29 @@ interface PropertyResponse {
       source: string;
       specialRequests: string | null;
       status: string;
+    }>;
+    housekeepingTasks: Array<{
+      assignedUserId: string | null;
+      completedAt: string | null;
+      completedByUserId: string | null;
+      createdAt: string;
+      createdByUserId: string | null;
+      id: string;
+      inspectedAt: string | null;
+      inspectedByUserId: string | null;
+      notes: string | null;
+      priority: string;
+      reason: string | null;
+      room: {
+        id: string;
+        number: string;
+        status: string;
+        type: string;
+      };
+      roomId: string;
+      status: string;
+      stayId: string | null;
+      type: string;
     }>;
     roomCount: number | null;
     ratePlans: Array<{
@@ -757,8 +786,21 @@ export default function PropertiesPage() {
     return counts;
   }, [selectedProperty?.hotelReservations]);
 
+  const housekeepingCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const task of selectedProperty?.housekeepingTasks ?? []) {
+      counts.set(task.status, (counts.get(task.status) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [selectedProperty?.housekeepingTasks]);
+
   const occupiedRoomCount = statusCounts.get("occupied") ?? 0;
   const availableRoomCount = statusCounts.get("available") ?? 0;
+  const openHousekeepingTaskCount =
+    (housekeepingCounts.get("open") ?? 0) +
+    (housekeepingCounts.get("in_progress") ?? 0);
   const outOfServiceRoomCount =
     (statusCounts.get("maintenance") ?? 0) +
     (statusCounts.get("out_of_order") ?? 0);
@@ -1374,6 +1416,37 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
+  async function updateHousekeepingTask(taskId: string, status: string) {
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+
+    if (!token || !propertyId) {
+      setError("Choose a property before updating housekeeping.");
+      return;
+    }
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/housekeeping-tasks/${taskId}`,
+      {
+        body: JSON.stringify({ status }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setError(
+        await readApiMessage(response, "Could not update housekeeping task."),
+      );
+      return;
+    }
+
+    await loadProperties();
+  }
+
   async function checkInGuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -1886,6 +1959,10 @@ export default function PropertiesPage() {
           <span>Reservations</span>
           <strong>{selectedProperty?.hotelReservations.length ?? 0}</strong>
         </div>
+        <div>
+          <span>Housekeeping</span>
+          <strong>{openHousekeepingTaskCount}</strong>
+        </div>
       </section>
 
       <section className="property-layout">
@@ -1954,6 +2031,11 @@ export default function PropertiesPage() {
                       <span>Out of service</span>
                       <strong>{outOfServiceRoomCount}</strong>
                       <small>Maintenance and out-of-order rooms</small>
+                    </div>
+                    <div className="hotel-kpi-card">
+                      <span>Housekeeping</span>
+                      <strong>{openHousekeepingTaskCount}</strong>
+                      <small>Open room turns after checkout</small>
                     </div>
                   </div>
 
@@ -2775,6 +2857,111 @@ export default function PropertiesPage() {
                       No rooms match these filters.
                     </div>
                   ) : null}
+                </section>
+              ) : null}
+
+              {activeWorkspaceTab === "housekeeping" ? (
+                <section
+                  className="notice-panel property-detail-card"
+                  id="housekeeping-board"
+                >
+                  <p className="eyebrow">Housekeeping</p>
+                  <h2>{selectedProperty.name}</h2>
+                  <p>
+                    Track checkout cleaning, mark rooms done, and release rooms
+                    after inspection.
+                  </p>
+
+                  <div className="hotel-dashboard-grid">
+                    <div className="hotel-kpi-card">
+                      <span>Open</span>
+                      <strong>{housekeepingCounts.get("open") ?? 0}</strong>
+                      <small>Waiting for assignment or pickup</small>
+                    </div>
+                    <div className="hotel-kpi-card">
+                      <span>In progress</span>
+                      <strong>
+                        {housekeepingCounts.get("in_progress") ?? 0}
+                      </strong>
+                      <small>Rooms currently being cleaned</small>
+                    </div>
+                    <div className="hotel-kpi-card">
+                      <span>Ready to inspect</span>
+                      <strong>{housekeepingCounts.get("done") ?? 0}</strong>
+                      <small>Supervisor release needed</small>
+                    </div>
+                  </div>
+
+                  <div className="rate-list">
+                    {selectedProperty.housekeepingTasks.map((task) => (
+                      <article className="rate-list-item" key={task.id}>
+                        <div>
+                          <strong>Room {task.room.number}</strong>
+                          <span>
+                            {formatLabel(task.type)} -{" "}
+                            {formatLabel(task.status)} -{" "}
+                            {formatLabel(task.priority)}
+                          </span>
+                          <small>
+                            {task.reason ?? "Housekeeping task"} -{" "}
+                            {task.room.type} - Room is{" "}
+                            {formatLabel(task.room.status)}
+                          </small>
+                          {task.completedAt ? (
+                            <small>
+                              Done {new Date(task.completedAt).toLocaleString()}
+                            </small>
+                          ) : null}
+                          {task.inspectedAt ? (
+                            <small>
+                              Inspected{" "}
+                              {new Date(task.inspectedAt).toLocaleString()}
+                            </small>
+                          ) : null}
+                        </div>
+                        <div className="room-action-row">
+                          {task.status === "open" ? (
+                            <button
+                              className="secondary-button"
+                              onClick={() =>
+                                updateHousekeepingTask(task.id, "in_progress")
+                              }
+                              type="button"
+                            >
+                              Start
+                            </button>
+                          ) : null}
+                          {["open", "in_progress"].includes(task.status) ? (
+                            <button
+                              className="secondary-button"
+                              onClick={() =>
+                                updateHousekeepingTask(task.id, "done")
+                              }
+                              type="button"
+                            >
+                              Mark done
+                            </button>
+                          ) : null}
+                          {task.status === "done" ? (
+                            <button
+                              className="primary-button"
+                              onClick={() =>
+                                updateHousekeepingTask(task.id, "inspected")
+                              }
+                              type="button"
+                            >
+                              Inspect and release
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                    {!selectedProperty.housekeepingTasks.length ? (
+                      <div className="empty-state">
+                        No active housekeeping tasks yet.
+                      </div>
+                    ) : null}
+                  </div>
                 </section>
               ) : null}
 
