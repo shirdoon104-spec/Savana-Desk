@@ -404,7 +404,7 @@ Goal: make checkout a controlled settlement process.
 - [x] Update room to `cleaning`.
 - [x] Generate customer invoice from closed folio.
 - [ ] Post revenue/payment records to finance ledger once finance module exists.
-- [ ] Add checkout receipt/print view.
+- [x] Add checkout receipt/print view.
 
 Checkout flow:
 
@@ -475,6 +475,10 @@ Status as of 2026-06-23: checkout generates an issued customer invoice inside
 the same transaction that locks the folio. The invoice copies active non-deposit
 folio lines, confirmed folio payments, and deposit credits, then records a
 `customer_invoice_generated` audit event.
+
+Status as of 2026-06-23: locked folios with generated invoices expose a browser
+print checkout receipt from the property folio view. The receipt includes
+invoice number, guest, room, charges, payments/credits, and balance.
 
 ## Phase 7: Housekeeping and Maintenance
 

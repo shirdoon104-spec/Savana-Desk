@@ -8,6 +8,7 @@ import {
   ClipboardList,
   DoorOpen,
   Plus,
+  Printer,
   RefreshCw,
   RotateCcw,
   Tags,
@@ -240,6 +241,31 @@ interface FolioDetailResponse {
     phone: string | null;
   };
   id: string;
+  invoice: {
+    balance: string | number;
+    currency: string;
+    id: string;
+    invoiceNumber: string;
+    issuedAt: string;
+    lineItemTotal: string | number;
+    lineItems: Array<{
+      amount: string | number;
+      currency: string;
+      description: string;
+      id: string;
+      type: string;
+    }>;
+    paymentTotal: string | number;
+    payments: Array<{
+      amount: string | number;
+      currency: string;
+      id: string;
+      method: string;
+      paidAt: string | null;
+      reference: string | null;
+    }>;
+    status: string;
+  } | null;
   lineItemTotal: string | number;
   lineItems: Array<{
     amount: string | number;
@@ -368,6 +394,20 @@ function formatMoney(value: string | number | null | undefined, currency = "") {
   }
 
   return `${currency ? `${currency} ` : ""}${amount.toFixed(2)}`;
+}
+
+function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      })[character] ?? character,
+  );
 }
 
 function formatFolioLineMeta(item: FolioDetailResponse["lineItems"][number]) {
@@ -1628,6 +1668,106 @@ export default function PropertiesPage() {
     }
   }
 
+  function printCheckoutReceipt(folio: FolioDetailResponse) {
+    if (!folio.invoice) {
+      setError("Checkout receipt is available after invoice generation.");
+      return;
+    }
+
+    const printedAt = new Date().toLocaleString();
+    const issuedAt = new Date(folio.invoice.issuedAt).toLocaleString();
+    const lineRows = folio.invoice.lineItems
+      .map(
+        (item) => `
+          <tr>
+            <td>
+              <strong>${escapeHtml(item.description)}</strong>
+              <span>${escapeHtml(formatLabel(item.type))}</span>
+            </td>
+            <td>${escapeHtml(formatMoney(item.amount, item.currency))}</td>
+          </tr>
+        `,
+      )
+      .join("");
+    const paymentRows = folio.invoice.payments
+      .map(
+        (payment) => `
+          <tr>
+            <td>
+              <strong>${escapeHtml(formatLabel(payment.method))}</strong>
+              <span>${escapeHtml(payment.reference ?? "")}</span>
+            </td>
+            <td>${escapeHtml(formatMoney(payment.amount, payment.currency))}</td>
+          </tr>
+        `,
+      )
+      .join("");
+    const printWindow = window.open("", "_blank", "width=760,height=900");
+
+    if (!printWindow) {
+      setError("Allow popups to print checkout receipts.");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(folio.invoice.invoiceNumber)}</title>
+          <style>
+            body { color: #0f172a; font-family: Arial, sans-serif; margin: 32px; }
+            header { border-bottom: 1px solid #cbd5e1; display: flex; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; }
+            h1, h2, p { margin: 0; }
+            h1 { font-size: 24px; }
+            h2 { font-size: 16px; margin-top: 24px; }
+            .muted, td span { color: #64748b; display: block; font-size: 12px; margin-top: 4px; }
+            table { border-collapse: collapse; margin-top: 12px; width: 100%; }
+            td { border-bottom: 1px solid #e2e8f0; padding: 10px 0; vertical-align: top; }
+            td:last-child { text-align: right; white-space: nowrap; }
+            .totals { margin-left: auto; margin-top: 20px; width: 320px; }
+            .totals div { display: flex; justify-content: space-between; padding: 6px 0; }
+            .total { border-top: 1px solid #cbd5e1; font-size: 18px; font-weight: 700; margin-top: 6px; padding-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <header>
+            <div>
+              <h1>${escapeHtml(folio.property.name)}</h1>
+              <p class="muted">Room ${escapeHtml(folio.room.number)} - ${escapeHtml(
+                `${folio.guest.firstName} ${folio.guest.lastName}`,
+              )}</p>
+            </div>
+            <div>
+              <p><strong>${escapeHtml(folio.invoice.invoiceNumber)}</strong></p>
+              <p class="muted">Issued ${escapeHtml(issuedAt)}</p>
+              <p class="muted">Printed ${escapeHtml(printedAt)}</p>
+            </div>
+          </header>
+          <h2>Charges</h2>
+          <table><tbody>${lineRows}</tbody></table>
+          <h2>Payments and credits</h2>
+          <table><tbody>${paymentRows || `<tr><td>No payments recorded.</td><td></td></tr>`}</tbody></table>
+          <section class="totals">
+            <div><span>Charges</span><strong>${escapeHtml(
+              formatMoney(folio.invoice.lineItemTotal, folio.invoice.currency),
+            )}</strong></div>
+            <div><span>Payments</span><strong>${escapeHtml(
+              formatMoney(folio.invoice.paymentTotal, folio.invoice.currency),
+            )}</strong></div>
+            <div class="total"><span>Balance</span><strong>${escapeHtml(
+              formatMoney(folio.invoice.balance, folio.invoice.currency),
+            )}</strong></div>
+          </section>
+          <script>
+            window.addEventListener("load", () => window.print());
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  }
+
   async function reverseFolioLineItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -2285,6 +2425,18 @@ export default function PropertiesPage() {
                           </h3>
                         </div>
                         <div className="room-action-row">
+                          {selectedFolio.invoice ? (
+                            <button
+                              className="secondary-button"
+                              onClick={() =>
+                                printCheckoutReceipt(selectedFolio)
+                              }
+                              type="button"
+                            >
+                              <Printer aria-hidden="true" />
+                              Print receipt
+                            </button>
+                          ) : null}
                           {data?.canManageProperties &&
                           selectedFolio.status === "open" ? (
                             <button

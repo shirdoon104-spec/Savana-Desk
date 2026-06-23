@@ -397,6 +397,16 @@ export class FoliosController {
           adjustments: {
             orderBy: { createdAt: "asc" },
           },
+          customerInvoice: {
+            include: {
+              lineItems: {
+                orderBy: { createdAt: "asc" },
+              },
+              payments: {
+                orderBy: { createdAt: "asc" },
+              },
+            },
+          },
           guest: true,
           legacyCharges: {
             orderBy: { createdAt: "asc" },
@@ -424,6 +434,16 @@ export class FoliosController {
         include: {
           adjustments: {
             orderBy: { createdAt: "asc" },
+          },
+          customerInvoice: {
+            include: {
+              lineItems: {
+                orderBy: { createdAt: "asc" },
+              },
+              payments: {
+                orderBy: { createdAt: "asc" },
+              },
+            },
           },
           guest: true,
           legacyCharges: {
@@ -549,6 +569,33 @@ export class FoliosController {
         phone: folio.guest.phone,
       },
       id: folio.id,
+      invoice: folio.customerInvoice
+        ? {
+            balance: folio.customerInvoice.balance.toString(),
+            currency: folio.customerInvoice.currency,
+            id: folio.customerInvoice.id,
+            invoiceNumber: folio.customerInvoice.invoiceNumber,
+            issuedAt: folio.customerInvoice.issuedAt,
+            lineItemTotal: folio.customerInvoice.lineItemTotal.toString(),
+            lineItems: folio.customerInvoice.lineItems.map((item) => ({
+              amount: item.amount.toString(),
+              currency: item.currency,
+              description: item.description,
+              id: item.id,
+              type: item.type,
+            })),
+            paymentTotal: folio.customerInvoice.paymentTotal.toString(),
+            payments: folio.customerInvoice.payments.map((payment) => ({
+              amount: payment.amount.toString(),
+              currency: payment.currency,
+              id: payment.id,
+              method: payment.method,
+              paidAt: payment.paidAt,
+              reference: payment.reference,
+            })),
+            status: folio.customerInvoice.status,
+          }
+        : null,
       lineItemTotal: lineItemTotal.toString(),
       lineItems: folio.lineItems.map((item) => ({
         amount: item.amount.toString(),
