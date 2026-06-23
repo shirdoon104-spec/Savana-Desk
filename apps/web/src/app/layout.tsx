@@ -41,14 +41,14 @@ export default function RootLayout({
 
   if (!hasValidClerkPublishableKey()) {
     return (
-      <html lang="en">
+      <html lang="en" suppressHydrationWarning>
         <body>{children}</body>
       </html>
     );
   }
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
         <ClerkProvider
           appearance={clerkAppearance}
