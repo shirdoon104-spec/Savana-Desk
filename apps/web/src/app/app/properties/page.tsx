@@ -1276,6 +1276,52 @@ export default function PropertiesPage() {
     }
     await loadProperties();
   }
+  async function purgePropertyInventory() {
+    const property = selectedProperty;
+    if (!property) return;
+
+    const confirmation = window.prompt(
+      `Type DELETE ${property.name} to permanently remove all unused hotel inventory.`,
+    );
+
+    if (confirmation !== `DELETE ${property.name}`) {
+      setError(
+        "Inventory purge cancelled because the confirmation did not match.",
+      );
+      return;
+    }
+
+    const token = await getOrganizationToken();
+    if (!token) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${property.id}/inventory/purge`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        method: "POST",
+      },
+    );
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(
+        await readApiMessage(
+          response,
+          "Could not permanently delete inventory.",
+        ),
+      );
+      return;
+    }
+
+    setEditingRoomId("");
+    setEditingRoomNumber("");
+    setEditingRoomTypeId("");
+    setEditingRoomTypeRecordId("");
+    setEditingRatePlanId("");
+    await loadProperties();
+  }
   async function setRoomTypeActive(
     roomType: PropertyResponse["properties"][number]["roomTypes"][number],
     isActive: boolean,
@@ -4228,6 +4274,21 @@ export default function PropertiesPage() {
                       </div>
                     ) : null}
                   </form>
+                  {data.currentUser.role === "owner" ? (
+                    <div className="room-action-row">
+                      <button
+                        className="danger-button"
+                        disabled={
+                          isSubmitting || !selectedProperty.rooms.length
+                        }
+                        onClick={() => void purgePropertyInventory()}
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" />
+                        Delete all hotel inventory
+                      </button>
+                    </div>
+                  ) : null}
                 </section>
               ) : null}
               {activeWorkspaceTab === "rates" && data?.canManageProperties ? (

@@ -880,6 +880,78 @@ export class PropertiesController {
     };
   }
 
+  @Post(":propertyId/inventory/purge")
+  @RequirePermission("property.manage")
+  async purgePropertyInventory(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+  ): Promise<Record<string, number>> {
+    if (context.role !== "owner") {
+      throw new BadRequestException(
+        "Only the system owner can permanently delete complete hotel inventory.",
+      );
+    }
+
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const [reservations, stays, folios, auditLogs, housekeeping, maintenance] =
+      await Promise.all([
+        this.prisma.hotelReservation.count({
+          where: { propertyId: property.id },
+        }),
+        this.prisma.stay.count({ where: { propertyId: property.id } }),
+        this.prisma.guestFolio.count({ where: { propertyId: property.id } }),
+        this.prisma.hotelAuditLog.count({ where: { propertyId: property.id } }),
+        this.prisma.housekeepingTask.count({
+          where: { propertyId: property.id },
+        }),
+        this.prisma.maintenanceRequest.count({
+          where: { propertyId: property.id },
+        }),
+      ]);
+
+    if (
+      reservations + stays + folios + auditLogs + housekeeping + maintenance >
+      0
+    ) {
+      throw new BadRequestException(
+        "This property has operational or financial history. Archive inventory instead of purging it.",
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const roomRates = await tx.roomRate.deleteMany({
+        where: { propertyId: property.id },
+      });
+      const cancellationPolicies = await tx.cancellationPolicy.deleteMany({
+        where: { propertyId: property.id },
+      });
+      const ratePlans = await tx.ratePlan.deleteMany({
+        where: { propertyId: property.id },
+      });
+      const rooms = await tx.room.deleteMany({
+        where: { propertyId: property.id },
+      });
+      const roomTypes = await tx.roomType.deleteMany({
+        where: { propertyId: property.id },
+      });
+
+      await tx.property.update({
+        where: { id: property.id },
+        data: { roomCount: 0 },
+      });
+
+      return {
+        cancellationPolicies: cancellationPolicies.count,
+        ratePlans: ratePlans.count,
+        roomRates: roomRates.count,
+        rooms: rooms.count,
+        roomTypes: roomTypes.count,
+      };
+    });
+  }
   @Post(":propertyId/room-types")
   @RequirePermission("property.manage")
   async upsertRoomType(
