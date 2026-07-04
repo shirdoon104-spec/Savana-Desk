@@ -12,6 +12,7 @@ import {
   RefreshCw,
   RotateCcw,
   Tags,
+  Trash2,
 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -1195,6 +1196,86 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
+  async function deleteRoom(roomId: string) {
+    if (!window.confirm("Permanently delete this unused room?")) return;
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+    if (!token || !propertyId) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        method: "DELETE",
+      },
+    );
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not delete room."));
+      return;
+    }
+
+    setEditingRoomId("");
+    setEditingRoomNumber("");
+    setEditingRoomTypeId("");
+    await loadProperties();
+  }
+
+  async function deleteRoomType(roomTypeId: string) {
+    if (!window.confirm("Permanently delete this unused room type?")) return;
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+    if (!token || !propertyId) return;
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/room-types/${roomTypeId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        method: "DELETE",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not delete room type."));
+      return;
+    }
+
+    if (editingRoomTypeRecordId === roomTypeId) {
+      setEditingRoomTypeRecordId("");
+      setRoomTypeName("");
+      setRoomTypeCode("");
+    }
+    await loadProperties();
+  }
+
+  async function deleteRatePlan(ratePlanId: string) {
+    if (!window.confirm("Permanently delete this unused rate plan?")) return;
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+    if (!token || !propertyId) return;
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rate-plans/${ratePlanId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        method: "DELETE",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not delete rate plan."));
+      return;
+    }
+
+    if (editingRatePlanId === ratePlanId) {
+      setEditingRatePlanId("");
+      setRatePlanName("");
+    }
+    await loadProperties();
+  }
   async function setRoomTypeActive(
     roomType: PropertyResponse["properties"][number]["roomTypes"][number],
     isActive: boolean,
@@ -4116,23 +4197,35 @@ export default function PropertiesPage() {
                       Save room
                     </button>
                     {editingRoomId ? (
-                      <button
-                        className="secondary-button"
-                        disabled={isSubmitting}
-                        onClick={() => {
-                          const room = selectedProperty.rooms.find(
-                            (candidate) => candidate.id === editingRoomId,
-                          );
-                          if (room) void setRoomActive(room.id, !room.isActive);
-                        }}
-                        type="button"
-                      >
-                        {selectedProperty.rooms.find(
-                          (room) => room.id === editingRoomId,
-                        )?.isActive
-                          ? "Archive room"
-                          : "Reactivate room"}
-                      </button>
+                      <div className="room-action-row">
+                        <button
+                          className="secondary-button"
+                          disabled={isSubmitting}
+                          onClick={() => {
+                            const room = selectedProperty.rooms.find(
+                              (candidate) => candidate.id === editingRoomId,
+                            );
+                            if (room)
+                              void setRoomActive(room.id, !room.isActive);
+                          }}
+                          type="button"
+                        >
+                          {selectedProperty.rooms.find(
+                            (room) => room.id === editingRoomId,
+                          )?.isActive
+                            ? "Archive room"
+                            : "Reactivate room"}
+                        </button>
+                        <button
+                          className="danger-button"
+                          disabled={isSubmitting}
+                          onClick={() => void deleteRoom(editingRoomId)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" />
+                          Delete room
+                        </button>
+                      </div>
                     ) : null}
                   </form>
                 </section>
@@ -4471,6 +4564,16 @@ export default function PropertiesPage() {
                                     ? "Deactivate"
                                     : "Activate"}
                                 </button>
+                                <button
+                                  className="danger-button"
+                                  onClick={() =>
+                                    void deleteRoomType(roomType.id)
+                                  }
+                                  type="button"
+                                >
+                                  <Trash2 aria-hidden="true" />
+                                  Delete
+                                </button>
                               </div>
                             </div>
                           ))}
@@ -4542,6 +4645,16 @@ export default function PropertiesPage() {
                                   {ratePlan.status === "active"
                                     ? "Deactivate"
                                     : "Activate"}
+                                </button>
+                                <button
+                                  className="danger-button"
+                                  onClick={() =>
+                                    void deleteRatePlan(ratePlan.id)
+                                  }
+                                  type="button"
+                                >
+                                  <Trash2 aria-hidden="true" />
+                                  Delete
                                 </button>
                               </div>
                             </div>

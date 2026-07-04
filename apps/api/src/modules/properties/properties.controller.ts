@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Delete,
   Param,
   Patch,
   Post,
@@ -929,6 +930,40 @@ export class PropertiesController {
     });
   }
 
+  @Delete(":propertyId/room-types/:roomTypeId")
+  @RequirePermission("property.manage")
+  async deleteRoomType(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("roomTypeId") roomTypeId: string,
+  ): Promise<{ deleted: true }> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const roomType = await this.findTenantRoomType(
+      context.tenant.id,
+      property.id,
+      roomTypeId,
+    );
+    const [rooms, reservations, ratePlans, roomRates] = await Promise.all([
+      this.prisma.room.count({ where: { roomTypeId: roomType.id } }),
+      this.prisma.hotelReservation.count({
+        where: { roomTypeId: roomType.id },
+      }),
+      this.prisma.ratePlan.count({ where: { roomTypeId: roomType.id } }),
+      this.prisma.roomRate.count({ where: { roomTypeId: roomType.id } }),
+    ]);
+
+    if (rooms + reservations + ratePlans + roomRates > 0) {
+      throw new BadRequestException(
+        "This room type is already in use. Deactivate it instead of deleting it.",
+      );
+    }
+
+    await this.prisma.roomType.delete({ where: { id: roomType.id } });
+    return { deleted: true };
+  }
   @Patch(":propertyId/room-types/:roomTypeId")
   @RequirePermission("property.manage")
   async updateRoomType(
@@ -1066,6 +1101,52 @@ export class PropertiesController {
     });
   }
 
+  @Delete(":propertyId/rate-plans/:ratePlanId")
+  @RequirePermission("property.manage")
+  async deleteRatePlan(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("ratePlanId") ratePlanId: string,
+  ): Promise<{ deleted: true }> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const ratePlan = await this.prisma.ratePlan.findFirst({
+      where: {
+        id: ratePlanId,
+        propertyId: property.id,
+        tenantId: context.tenant.id,
+      },
+    });
+
+    if (!ratePlan) {
+      throw new BadRequestException(
+        "Rate plan was not found for this property.",
+      );
+    }
+
+    const [reservations, roomRates] = await Promise.all([
+      this.prisma.hotelReservation.count({
+        where: { ratePlanId: ratePlan.id },
+      }),
+      this.prisma.roomRate.count({ where: { ratePlanId: ratePlan.id } }),
+    ]);
+
+    if (reservations + roomRates > 0) {
+      throw new BadRequestException(
+        "This rate plan has reservations or date rates. Deactivate it instead of deleting it.",
+      );
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.cancellationPolicy.deleteMany({
+        where: { ratePlanId: ratePlan.id },
+      }),
+      this.prisma.ratePlan.delete({ where: { id: ratePlan.id } }),
+    ]);
+    return { deleted: true };
+  }
   @Patch(":propertyId/rate-plans/:ratePlanId")
   @RequirePermission("property.manage")
   async updateRatePlan(
@@ -1639,6 +1720,56 @@ export class PropertiesController {
     });
   }
 
+  @Delete(":propertyId/rooms/:roomId")
+  @RequirePermission("property.manage")
+  async deleteRoom(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("roomId") roomId: string,
+  ): Promise<{ deleted: true }> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      roomId,
+    );
+    const [stays, reservations, housekeeping, maintenance, auditLogs] =
+      await Promise.all([
+        this.prisma.stay.count({ where: { roomId: room.id } }),
+        this.prisma.hotelReservation.count({
+          where: { assignedRoomId: room.id },
+        }),
+        this.prisma.housekeepingTask.count({ where: { roomId: room.id } }),
+        this.prisma.maintenanceRequest.count({ where: { roomId: room.id } }),
+        this.prisma.hotelAuditLog.count({ where: { roomId: room.id } }),
+      ]);
+
+    if (stays + reservations + housekeeping + maintenance + auditLogs > 0) {
+      throw new BadRequestException(
+        "This room has operational history. Archive it instead of deleting it.",
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.room.delete({ where: { id: room.id } });
+      const activeRoomCount = await tx.room.count({
+        where: {
+          isActive: true,
+          propertyId: property.id,
+          tenantId: context.tenant.id,
+        },
+      });
+      await tx.property.update({
+        where: { id: property.id },
+        data: { roomCount: activeRoomCount },
+      });
+    });
+
+    return { deleted: true };
+  }
   @Patch(":propertyId/rooms/:roomId/inventory")
   @RequirePermission("property.manage")
   async updateRoomInventory(
