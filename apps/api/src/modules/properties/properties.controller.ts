@@ -323,6 +323,21 @@ class CreateRoomRateDto {
   startDate!: string;
 }
 
+class UpdateRoomInventoryDto {
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  number?: string;
+
+  @IsOptional()
+  @IsString()
+  roomTypeId?: string;
+}
+
 class UpdateRoomStatusDto {
   @IsIn(roomStatuses)
   status!: RoomStatus;
@@ -841,6 +856,7 @@ export class PropertiesController {
               }
             : null,
           id: room.id,
+          isActive: room.isActive,
           number: room.number,
           roomType: room.roomType
             ? {
@@ -913,6 +929,70 @@ export class PropertiesController {
     });
   }
 
+  @Patch(":propertyId/room-types/:roomTypeId")
+  @RequirePermission("property.manage")
+  async updateRoomType(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("roomTypeId") roomTypeId: string,
+    @Body() body: UpsertRoomTypeDto,
+  ): Promise<Record<string, unknown>> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const roomType = await this.findTenantRoomType(
+      context.tenant.id,
+      property.id,
+      roomTypeId,
+    );
+    const name = body.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException("Room type name is required.");
+    }
+
+    const code = this.toRoomTypeCode(body.code?.trim() || roomType.code);
+    const duplicate = await this.prisma.roomType.findFirst({
+      where: {
+        code,
+        id: { not: roomType.id },
+        propertyId: property.id,
+      },
+    });
+
+    if (duplicate) {
+      throw new BadRequestException(
+        "Another room type already uses this code.",
+      );
+    }
+
+    return this.prisma.roomType.update({
+      where: { id: roomType.id },
+      data: {
+        baseOccupancy:
+          this.optionalPositiveInteger(body.baseOccupancy) ??
+          roomType.baseOccupancy,
+        code,
+        defaultCurrency: property.currency,
+        defaultRate:
+          body.defaultRate === undefined
+            ? roomType.defaultRate
+            : this.optionalDecimal(body.defaultRate, "Default rate"),
+        description:
+          body.description === undefined
+            ? roomType.description
+            : body.description.trim() || null,
+        isActive: body.isActive ?? roomType.isActive,
+        maxOccupancy:
+          body.maxOccupancy === undefined
+            ? roomType.maxOccupancy
+            : this.optionalPositiveInteger(body.maxOccupancy),
+        name,
+      },
+    });
+  }
+
   @Post(":propertyId/rate-plans")
   @RequirePermission("property.manage")
   async createRatePlan(
@@ -978,6 +1058,93 @@ export class PropertiesController {
         roomTypeId: body.roomTypeId?.trim() || null,
         status: body.status ?? "active",
         tenantId: context.tenant.id,
+      },
+      include: {
+        cancellationPolicy: true,
+        roomType: true,
+      },
+    });
+  }
+
+  @Patch(":propertyId/rate-plans/:ratePlanId")
+  @RequirePermission("property.manage")
+  async updateRatePlan(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("ratePlanId") ratePlanId: string,
+    @Body() body: CreateRatePlanDto,
+  ): Promise<Record<string, unknown>> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const ratePlan = await this.prisma.ratePlan.findFirst({
+      where: {
+        id: ratePlanId,
+        propertyId: property.id,
+        tenantId: context.tenant.id,
+      },
+    });
+
+    if (!ratePlan) {
+      throw new BadRequestException(
+        "Rate plan was not found for this property.",
+      );
+    }
+    const name = body.name?.trim();
+
+    if (!name) {
+      throw new BadRequestException("Rate plan name is required.");
+    }
+
+    if (body.roomTypeId) {
+      await this.findTenantRoomType(
+        context.tenant.id,
+        property.id,
+        body.roomTypeId,
+      );
+    }
+
+    const code = this.toRoomTypeCode(body.code?.trim() || ratePlan.code);
+    const duplicate = await this.prisma.ratePlan.findFirst({
+      where: {
+        code,
+        id: { not: ratePlan.id },
+        propertyId: property.id,
+      },
+    });
+
+    if (duplicate) {
+      throw new BadRequestException(
+        "Another rate plan already uses this code.",
+      );
+    }
+
+    return this.prisma.ratePlan.update({
+      where: { id: ratePlan.id },
+      data: {
+        baseOccupancy:
+          this.optionalPositiveInteger(body.baseOccupancy) ??
+          ratePlan.baseOccupancy,
+        code,
+        defaultRate:
+          body.defaultRate === undefined
+            ? ratePlan.defaultRate
+            : this.optionalDecimal(body.defaultRate, "Default rate"),
+        description:
+          body.description === undefined
+            ? ratePlan.description
+            : body.description.trim() || null,
+        extraGuestRate:
+          body.extraGuestRate === undefined
+            ? ratePlan.extraGuestRate
+            : (this.optionalDecimal(body.extraGuestRate, "Extra guest rate") ??
+              new Prisma.Decimal(0)),
+        minNights:
+          this.optionalPositiveInteger(body.minNights) ?? ratePlan.minNights,
+        name,
+        roomTypeId: body.roomTypeId?.trim() || null,
+        status: body.status ?? ratePlan.status,
       },
       include: {
         cancellationPolicy: true,
@@ -1197,7 +1364,11 @@ export class PropertiesController {
     });
 
     const updatedRooms = await this.prisma.room.findMany({
-      where: { propertyId: property.id, tenantId: context.tenant.id },
+      where: {
+        isActive: true,
+        propertyId: property.id,
+        tenantId: context.tenant.id,
+      },
       orderBy: { number: "asc" },
     });
 
@@ -1465,6 +1636,127 @@ export class PropertiesController {
         statusChangedAt: new Date(),
         statusChangedByUserId: context.tenantUser.clerkUserId,
       },
+    });
+  }
+
+  @Patch(":propertyId/rooms/:roomId/inventory")
+  @RequirePermission("property.manage")
+  async updateRoomInventory(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("roomId") roomId: string,
+    @Body() body: UpdateRoomInventoryDto,
+  ): Promise<Record<string, unknown>> {
+    const property = await this.findTenantProperty(
+      context.tenant.id,
+      propertyId,
+    );
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      roomId,
+    );
+    const number = body.number?.trim() || room.number;
+    const roomType = body.roomTypeId
+      ? await this.findTenantRoomType(
+          context.tenant.id,
+          property.id,
+          body.roomTypeId,
+        )
+      : room.roomTypeId
+        ? await this.findTenantRoomType(
+            context.tenant.id,
+            property.id,
+            room.roomTypeId,
+          )
+        : null;
+
+    const duplicate = await this.prisma.room.findFirst({
+      where: {
+        id: { not: room.id },
+        number,
+        propertyId: property.id,
+      },
+    });
+
+    if (duplicate) {
+      throw new BadRequestException("Another room already uses this number.");
+    }
+
+    if (body.isActive === false) {
+      const [
+        activeStay,
+        activeReservation,
+        housekeepingTask,
+        maintenanceRequest,
+      ] = await Promise.all([
+        this.prisma.stay.findFirst({
+          where: { roomId: room.id, status: "active" },
+        }),
+        this.prisma.hotelReservation.findFirst({
+          where: {
+            assignedRoomId: room.id,
+            status: { in: ["confirmed", "guaranteed", "checked_in"] },
+          },
+        }),
+        this.prisma.housekeepingTask.findFirst({
+          where: {
+            roomId: room.id,
+            status: { in: ["open", "in_progress", "done"] },
+          },
+        }),
+        this.prisma.maintenanceRequest.findFirst({
+          where: {
+            roomId: room.id,
+            status: { in: ["open", "in_progress"] },
+          },
+        }),
+      ]);
+
+      if (
+        activeStay ||
+        activeReservation ||
+        housekeepingTask ||
+        maintenanceRequest
+      ) {
+        throw new BadRequestException(
+          "Resolve active stays, reservations, housekeeping, and maintenance before archiving this room.",
+        );
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updatedRoom = await tx.room.update({
+        where: { id: room.id },
+        data: {
+          isActive: body.isActive ?? room.isActive,
+          number,
+          roomTypeId: roomType?.id ?? null,
+          status:
+            body.isActive === false
+              ? "out_of_order"
+              : body.isActive === true && !room.isActive
+                ? "available"
+                : room.status,
+          type: roomType?.name ?? room.type,
+        },
+        include: { roomType: true },
+      });
+
+      const activeRoomCount = await tx.room.count({
+        where: {
+          isActive: true,
+          propertyId: property.id,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      await tx.property.update({
+        where: { id: property.id },
+        data: { roomCount: activeRoomCount },
+      });
+
+      return updatedRoom;
     });
   }
 

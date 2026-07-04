@@ -237,6 +237,7 @@ interface PropertyResponse {
         notes: string | null;
       } | null;
       id: string;
+      isActive: boolean;
       number: string;
       roomType: {
         baseOccupancy: number;
@@ -572,6 +573,11 @@ export default function PropertiesPage() {
   const [lateCheckoutFeeType, setLateCheckoutFeeType] = useState("none");
   const [lateCheckoutFeeValue, setLateCheckoutFeeValue] = useState("0");
   const [roomType, setRoomType] = useState("standard");
+  const [editingRoomId, setEditingRoomId] = useState("");
+  const [editingRoomNumber, setEditingRoomNumber] = useState("");
+  const [editingRoomTypeId, setEditingRoomTypeId] = useState("");
+  const [editingRoomTypeRecordId, setEditingRoomTypeRecordId] = useState("");
+  const [editingRatePlanId, setEditingRatePlanId] = useState("");
   const [roomTypeName, setRoomTypeName] = useState("");
   const [roomTypeCode, setRoomTypeCode] = useState("");
   const [roomTypeDefaultRate, setRoomTypeDefaultRate] = useState("");
@@ -773,6 +779,7 @@ export default function PropertiesPage() {
     () =>
       selectedProperty?.rooms.filter(
         (room) =>
+          room.isActive &&
           !["maintenance", "out_of_order"].includes(room.status) &&
           (!reservationRoomTypeId || room.roomTypeId === reservationRoomTypeId),
       ) ?? [],
@@ -792,6 +799,7 @@ export default function PropertiesPage() {
   const filteredRooms = useMemo(() => {
     return (
       selectedProperty?.rooms.filter((room) => {
+        if (!room.isActive) return false;
         const matchesStatus =
           statusFilter === "all" || room.status === statusFilter;
         const matchesType = typeFilter === "all" || room.type === typeFilter;
@@ -808,6 +816,7 @@ export default function PropertiesPage() {
     }
 
     for (const room of selectedProperty?.rooms ?? []) {
+      if (!room.isActive) continue;
       counts.set(room.status, (counts.get(room.status) ?? 0) + 1);
     }
 
@@ -848,6 +857,7 @@ export default function PropertiesPage() {
     () =>
       selectedProperty?.rooms.filter(
         (room) =>
+          room.isActive &&
           !room.activeStay &&
           !selectedProperty.maintenanceRequests.some(
             (request) => request.roomId === room.id,
@@ -855,6 +865,8 @@ export default function PropertiesPage() {
       ) ?? [],
     [selectedProperty?.maintenanceRequests, selectedProperty?.rooms],
   );
+  const activeRoomCount =
+    selectedProperty?.rooms.filter((room) => room.isActive).length ?? 0;
   const occupiedRoomCount = statusCounts.get("occupied") ?? 0;
   const availableRoomCount = statusCounts.get("available") ?? 0;
   const openHousekeepingTaskCount =
@@ -863,8 +875,8 @@ export default function PropertiesPage() {
   const outOfServiceRoomCount =
     (statusCounts.get("maintenance") ?? 0) +
     (statusCounts.get("out_of_order") ?? 0);
-  const occupancyRate = selectedProperty?.rooms.length
-    ? Math.round((occupiedRoomCount / selectedProperty.rooms.length) * 100)
+  const occupancyRate = activeRoomCount
+    ? Math.round((occupiedRoomCount / activeRoomCount) * 100)
     : 0;
 
   async function getOrganizationToken() {
@@ -1112,6 +1124,148 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
+  async function saveRoomInventory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+
+    if (!token || !propertyId || !editingRoomId) {
+      setError("Choose a room before saving inventory changes.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${editingRoomId}/inventory`,
+      {
+        body: JSON.stringify({
+          number: editingRoomNumber,
+          roomTypeId: editingRoomTypeId || undefined,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(
+        await readApiMessage(response, "Could not update room inventory."),
+      );
+      return;
+    }
+
+    await loadProperties();
+  }
+
+  async function setRoomActive(roomId: string, isActive: boolean) {
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+    if (!token || !propertyId) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rooms/${roomId}/inventory`,
+      {
+        body: JSON.stringify({ isActive }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(
+        await readApiMessage(
+          response,
+          isActive ? "Could not reactivate room." : "Could not archive room.",
+        ),
+      );
+      return;
+    }
+
+    await loadProperties();
+  }
+
+  async function setRoomTypeActive(
+    roomType: PropertyResponse["properties"][number]["roomTypes"][number],
+    isActive: boolean,
+  ) {
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+    if (!token || !propertyId) return;
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/room-types/${roomType.id}`,
+      {
+        body: JSON.stringify({
+          baseOccupancy: roomType.baseOccupancy,
+          code: roomType.code,
+          defaultRate: roomType.defaultRate ?? undefined,
+          isActive,
+          maxOccupancy: roomType.maxOccupancy ?? undefined,
+          name: roomType.name,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not update room type."));
+      return;
+    }
+
+    await loadProperties();
+  }
+
+  async function setRatePlanActive(
+    ratePlan: PropertyResponse["properties"][number]["ratePlans"][number],
+    status: "active" | "inactive",
+  ) {
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+    if (!token || !propertyId) return;
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rate-plans/${ratePlan.id}`,
+      {
+        body: JSON.stringify({
+          baseOccupancy: ratePlan.baseOccupancy,
+          code: ratePlan.code,
+          defaultRate: ratePlan.defaultRate ?? undefined,
+          extraGuestRate: ratePlan.extraGuestRate,
+          minNights: ratePlan.minNights,
+          name: ratePlan.name,
+          roomTypeId: ratePlan.roomTypeId ?? undefined,
+          status,
+        }),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+
+    if (!response.ok) {
+      setError(await readApiMessage(response, "Could not update rate plan."));
+      return;
+    }
+
+    await loadProperties();
+  }
   async function saveRoomType(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -1127,7 +1281,7 @@ export default function PropertiesPage() {
     }
 
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/room-types`,
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/room-types${editingRoomTypeRecordId ? `/${editingRoomTypeRecordId}` : ""}`,
       {
         body: JSON.stringify({
           baseOccupancy: Number(roomTypeBaseOccupancy),
@@ -1142,7 +1296,7 @@ export default function PropertiesPage() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        method: "POST",
+        method: editingRoomTypeRecordId ? "PATCH" : "POST",
       },
     );
 
@@ -1158,6 +1312,7 @@ export default function PropertiesPage() {
     setRoomTypeDefaultRate("");
     setRoomTypeBaseOccupancy("1");
     setRoomTypeMaxOccupancy("");
+    setEditingRoomTypeRecordId("");
     await loadProperties();
   }
 
@@ -1176,7 +1331,7 @@ export default function PropertiesPage() {
     }
 
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rate-plans`,
+      `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/rate-plans${editingRatePlanId ? `/${editingRatePlanId}` : ""}`,
       {
         body: JSON.stringify({
           defaultRate: ratePlanDefaultRate || undefined,
@@ -1189,7 +1344,7 @@ export default function PropertiesPage() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        method: "POST",
+        method: editingRatePlanId ? "PATCH" : "POST",
       },
     );
 
@@ -1205,6 +1360,7 @@ export default function PropertiesPage() {
     setRatePlanDefaultRate("");
     setRatePlanExtraGuestRate("0");
     setRatePlanMinNights("1");
+    setEditingRatePlanId("");
     await loadProperties();
   }
 
@@ -2107,7 +2263,8 @@ export default function PropertiesPage() {
           <span>Rooms</span>
           <strong>
             {data?.properties.reduce(
-              (total, property) => total + property.rooms.length,
+              (total, property) =>
+                total + property.rooms.filter((room) => room.isActive).length,
               0,
             ) ?? 0}
           </strong>
@@ -2146,8 +2303,9 @@ export default function PropertiesPage() {
               <strong>{property.name}</strong>
               <span>{property.city ?? "City not set"}</span>
               <small>
-                {property.rooms.length} rooms - {property.roomTypes.length}{" "}
-                types - {property.ratePlans.length} plans - {property.currency}
+                {property.rooms.filter((room) => room.isActive).length} rooms -{" "}
+                {property.roomTypes.length} types - {property.ratePlans.length}{" "}
+                plans - {property.currency}
               </small>
             </button>
           ))}
@@ -2177,8 +2335,7 @@ export default function PropertiesPage() {
                       <span>Occupancy</span>
                       <strong>{occupancyRate}%</strong>
                       <small>
-                        {occupiedRoomCount} occupied of{" "}
-                        {selectedProperty.rooms.length} rooms
+                        {occupiedRoomCount} occupied of {activeRoomCount} rooms
                       </small>
                     </div>
                     <div className="hotel-kpi-card">
@@ -3015,11 +3172,11 @@ export default function PropertiesPage() {
                     </div>
                   ) : null}
 
-                  {!selectedProperty.rooms.length ? (
+                  {!activeRoomCount ? (
                     <div className="empty-state">No rooms added yet.</div>
                   ) : null}
 
-                  {selectedProperty.rooms.length && !filteredRooms.length ? (
+                  {activeRoomCount && !filteredRooms.length ? (
                     <div className="empty-state">
                       No rooms match these filters.
                     </div>
@@ -3880,6 +4037,106 @@ export default function PropertiesPage() {
                 </>
               ) : null}
 
+              {activeWorkspaceTab === "setup" && data?.canManageProperties ? (
+                <section
+                  className="notice-panel compact-panel"
+                  id="room-inventory-editor"
+                >
+                  <div className="rate-management-header">
+                    <div>
+                      <p className="eyebrow">Room inventory</p>
+                      <h2>Edit or archive rooms</h2>
+                    </div>
+                    <span>
+                      {
+                        selectedProperty.rooms.filter((room) => room.isActive)
+                          .length
+                      }{" "}
+                      active
+                    </span>
+                  </div>
+                  <form className="inventory-form" onSubmit={saveRoomInventory}>
+                    <label>
+                      Room
+                      <select
+                        onChange={(event) => {
+                          const room = selectedProperty.rooms.find(
+                            (candidate) => candidate.id === event.target.value,
+                          );
+                          setEditingRoomId(event.target.value);
+                          setEditingRoomNumber(room?.number ?? "");
+                          setEditingRoomTypeId(room?.roomTypeId ?? "");
+                        }}
+                        value={editingRoomId}
+                      >
+                        <option value="">Choose room</option>
+                        {selectedProperty.rooms.map((room) => (
+                          <option key={room.id} value={room.id}>
+                            {room.number} - {room.roomType?.name ?? room.type}
+                            {room.isActive ? "" : " (archived)"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Number
+                      <input
+                        disabled={!editingRoomId}
+                        maxLength={24}
+                        onChange={(event) =>
+                          setEditingRoomNumber(event.target.value)
+                        }
+                        required
+                        value={editingRoomNumber}
+                      />
+                    </label>
+                    <label>
+                      Room type
+                      <select
+                        disabled={!editingRoomId}
+                        onChange={(event) =>
+                          setEditingRoomTypeId(event.target.value)
+                        }
+                        required
+                        value={editingRoomTypeId}
+                      >
+                        <option value="">Choose type</option>
+                        {selectedProperty.roomTypes.map((roomType) => (
+                          <option key={roomType.id} value={roomType.id}>
+                            {roomType.name}
+                            {roomType.isActive ? "" : " (inactive)"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      disabled={isSubmitting || !editingRoomId}
+                      type="submit"
+                    >
+                      Save room
+                    </button>
+                    {editingRoomId ? (
+                      <button
+                        className="secondary-button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          const room = selectedProperty.rooms.find(
+                            (candidate) => candidate.id === editingRoomId,
+                          );
+                          if (room) void setRoomActive(room.id, !room.isActive);
+                        }}
+                        type="button"
+                      >
+                        {selectedProperty.rooms.find(
+                          (room) => room.id === editingRoomId,
+                        )?.isActive
+                          ? "Archive room"
+                          : "Reactivate room"}
+                      </button>
+                    ) : null}
+                  </form>
+                </section>
+              ) : null}
               {activeWorkspaceTab === "rates" && data?.canManageProperties ? (
                 <section
                   className="notice-panel rate-management"
@@ -4053,7 +4310,7 @@ export default function PropertiesPage() {
                         </label>
                         <button disabled={isSubmitting} type="submit">
                           <Plus aria-hidden="true" />
-                          Create plan
+                          {editingRatePlanId ? "Save plan" : "Create plan"}
                         </button>
                       </form>
 
@@ -4171,8 +4428,50 @@ export default function PropertiesPage() {
                                 {formatMoney(
                                   roomType.defaultRate,
                                   roomType.defaultCurrency,
-                                )}
+                                )}{" "}
+                                · {roomType.isActive ? "Active" : "Inactive"}
                               </span>
+                              <div className="room-action-row">
+                                <button
+                                  className="secondary-button"
+                                  onClick={() => {
+                                    setEditingRoomTypeRecordId(roomType.id);
+                                    setRoomTypeName(roomType.name);
+                                    setRoomTypeCode(roomType.code);
+                                    setRoomTypeDefaultRate(
+                                      roomType.defaultRate === null
+                                        ? ""
+                                        : String(roomType.defaultRate),
+                                    );
+                                    setRoomTypeBaseOccupancy(
+                                      String(roomType.baseOccupancy),
+                                    );
+                                    setRoomTypeMaxOccupancy(
+                                      roomType.maxOccupancy === null
+                                        ? ""
+                                        : String(roomType.maxOccupancy),
+                                    );
+                                    setActiveRateTab("create");
+                                  }}
+                                  type="button"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    setRoomTypeActive(
+                                      roomType,
+                                      !roomType.isActive,
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  {roomType.isActive
+                                    ? "Deactivate"
+                                    : "Activate"}
+                                </button>
+                              </div>
                             </div>
                           ))}
                           {!selectedProperty.roomTypes.length ? (
@@ -4198,7 +4497,53 @@ export default function PropertiesPage() {
                                   ratePlan.currency,
                                 )}
                               </span>
-                              <span>{ratePlan.minNights} night min.</span>
+                              <span>
+                                {ratePlan.minNights} night min. ·{" "}
+                                {formatLabel(ratePlan.status)}
+                              </span>
+                              <div className="room-action-row">
+                                <button
+                                  className="secondary-button"
+                                  onClick={() => {
+                                    setEditingRatePlanId(ratePlan.id);
+                                    setRatePlanName(ratePlan.name);
+                                    setRatePlanRoomTypeId(
+                                      ratePlan.roomTypeId ?? "",
+                                    );
+                                    setRatePlanDefaultRate(
+                                      ratePlan.defaultRate === null
+                                        ? ""
+                                        : String(ratePlan.defaultRate),
+                                    );
+                                    setRatePlanExtraGuestRate(
+                                      String(ratePlan.extraGuestRate),
+                                    );
+                                    setRatePlanMinNights(
+                                      String(ratePlan.minNights),
+                                    );
+                                    setActiveRateTab("create");
+                                  }}
+                                  type="button"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="secondary-button"
+                                  onClick={() =>
+                                    setRatePlanActive(
+                                      ratePlan,
+                                      ratePlan.status === "active"
+                                        ? "inactive"
+                                        : "active",
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  {ratePlan.status === "active"
+                                    ? "Deactivate"
+                                    : "Activate"}
+                                </button>
+                              </div>
                             </div>
                           ))}
                           {!selectedProperty.ratePlans.length ? (

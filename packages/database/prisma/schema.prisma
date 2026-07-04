@@ -144,6 +144,7 @@ model Room {
   number              String
   type                String
   status              RoomStatus           @default(available)
+  isActive            Boolean              @default(true)
   property            Property             @relation(fields: [propertyId], references: [id])
   roomType            RoomType?            @relation(fields: [roomTypeId], references: [id])
   stays               Stay[]
@@ -155,7 +156,7 @@ model Room {
   updatedAt           DateTime             @updatedAt
 
   @@unique([propertyId, number])
-  @@index([tenantId, propertyId, status])
+  @@index([tenantId, propertyId, isActive, status])
   @@index([tenantId, propertyId, roomTypeId])
 }
 
