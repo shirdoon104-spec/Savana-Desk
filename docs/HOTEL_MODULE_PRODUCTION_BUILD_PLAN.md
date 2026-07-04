@@ -487,13 +487,13 @@ Goal: make room status operationally useful for staff.
 - [x] Add housekeeping task model.
 - [x] Auto-create cleaning task after checkout.
 - [x] Add room inspection status.
-- [ ] Add maintenance request model.
+- [x] Add maintenance request model.
 - [x] Allow housekeeping to mark room clean.
 - [x] Allow supervisor/admin to inspect and release room.
-- [ ] Allow maintenance to mark room out of order.
-- [ ] Track reason, assigned user, priority, and resolution notes.
+- [x] Allow maintenance to mark room out of order.
+- [x] Track reason, assigned user, priority, and resolution notes.
 - [x] Add housekeeping board UI.
-- [ ] Add maintenance board UI.
+- [x] Add maintenance board UI.
 
 Status as of 2026-06-23: first housekeeping slice is implemented. Checkout now
 creates an open cleaning task when a room moves to `cleaning`. The property
@@ -501,6 +501,11 @@ workspace includes a housekeeping board with open, in-progress, and ready-to-
 inspect task counts. Housekeeping can start and mark tasks done, while managers
 can inspect and release the room back to `available`.
 
+Status as of 2026-07-04: maintenance requests now block vacant rooms as
+`maintenance` or `out_of_order`, track priority, assignment metadata, reason,
+notes, and resolution details, and write hotel audit events. The property
+workspace includes a maintenance board for creating, starting, resolving, and
+releasing room inventory. Active stays and duplicate open requests are blocked.
 Housekeeping statuses:
 
 - `dirty`

@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth, useOrganization } from "@clerk/nextjs";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 interface TenantContext {
@@ -54,7 +55,9 @@ export function TenantSummary() {
           setError("Could not load workspace context.");
         }
       } catch {
-        setError("Could not reach the Rayaan API. Check that the API is running.");
+        setError(
+          "Could not reach the Rayaan API. Check that the API is running.",
+        );
       }
     }
 
@@ -77,9 +80,14 @@ export function TenantSummary() {
         <p className="eyebrow">Workspace</p>
         <h2>Finish onboarding</h2>
         <p>
-          Create your hotel workspace to unlock tenant-scoped properties,
-          roles, restaurants, payments, and offline devices.
+          Create your hotel workspace to unlock tenant-scoped properties, roles,
+          restaurants, payments, and offline devices.
         </p>
+        <div className="room-action-row">
+          <Link className="primary-button" href="/onboarding">
+            Continue setup
+          </Link>
+        </div>
       </section>
     );
   }
@@ -95,13 +103,16 @@ export function TenantSummary() {
           <p className="eyebrow">Workspace ready</p>
           <h2>{context.tenant.name}</h2>
           <p>
-            Your tenant workspace is connected to Clerk Organizations and
-            ready for property setup, roles, payments, and operations modules.
+            Your tenant workspace is connected to Clerk Organizations and ready
+            for property setup, roles, payments, and operations modules.
           </p>
         </div>
       </section>
 
-      <section className="status-grid tenant-summary" aria-label="Tenant summary">
+      <section
+        className="status-grid tenant-summary"
+        aria-label="Tenant summary"
+      >
         <div>
           <span>Property</span>
           <strong>{firstProperty?.name ?? "Not created"}</strong>
@@ -120,7 +131,10 @@ export function TenantSummary() {
         </div>
       </section>
 
-      <section className="module-grid dashboard-actions" aria-label="Next actions">
+      <section
+        className="module-grid dashboard-actions"
+        aria-label="Next actions"
+      >
         <article className="module-card">
           <h2>Front desk</h2>
           <p>Next: create room types, rooms, and reservation basics.</p>

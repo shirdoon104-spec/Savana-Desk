@@ -65,6 +65,14 @@ const housekeepingTaskStatuses = [
   "cancelled",
 ] as const;
 type HousekeepingTaskStatus = (typeof housekeepingTaskStatuses)[number];
+const maintenanceRequestStatuses = [
+  "open",
+  "in_progress",
+  "resolved",
+  "cancelled",
+] as const;
+type MaintenanceRequestStatus = (typeof maintenanceRequestStatuses)[number];
+const maintenancePriorities = ["low", "normal", "high", "urgent"] as const;
 type RoomChargeLineItem = {
   amount: Prisma.Decimal;
   currency: string;
@@ -335,6 +343,53 @@ class UpdateHousekeepingTaskDto {
   status!: HousekeepingTaskStatus;
 }
 
+class CreateMaintenanceRequestDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  assignedUserId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
+  @IsOptional()
+  @IsIn(maintenancePriorities)
+  priority?: (typeof maintenancePriorities)[number];
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(240)
+  reason!: string;
+
+  @IsString()
+  roomId!: string;
+
+  @IsOptional()
+  @IsIn(["maintenance", "out_of_order"])
+  roomStatus?: "maintenance" | "out_of_order";
+}
+
+class UpdateMaintenanceRequestDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  assignedUserId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  resolutionNotes?: string;
+
+  @IsIn(maintenanceRequestStatuses)
+  status!: MaintenanceRequestStatus;
+}
 class CheckInDto {
   @IsOptional()
   @Transform(emptyToUndefined)
@@ -573,6 +628,17 @@ export class PropertiesController {
             },
           },
         },
+        maintenanceRequests: {
+          include: {
+            room: true,
+          },
+          orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+          where: {
+            status: {
+              in: ["open", "in_progress"],
+            },
+          },
+        },
         roomTypes: {
           orderBy: [{ isActive: "desc" }, { name: "asc" }],
         },
@@ -608,6 +674,9 @@ export class PropertiesController {
       canManageStays: hasTenantPermission(context.role, "reservations.manage"),
       canManageRooms: hasTenantPermission(context.role, "rooms.manage"),
       canManageProperties: hasTenantPermission(context.role, "property.manage"),
+      canManageMaintenance:
+        context.role === "maintenance" ||
+        hasTenantPermission(context.role, "property.manage"),
       currentUser: {
         clerkUserId: context.tenantUser.clerkUserId,
         role: context.role,
@@ -653,6 +722,28 @@ export class PropertiesController {
           status: task.status,
           stayId: task.stayId,
           type: task.type,
+        })),
+        maintenanceRequests: property.maintenanceRequests.map((request) => ({
+          assignedUserId: request.assignedUserId,
+          createdAt: request.createdAt,
+          id: request.id,
+          notes: request.notes,
+          priority: request.priority,
+          reason: request.reason,
+          reportedByUserId: request.reportedByUserId,
+          resolutionNotes: request.resolutionNotes,
+          resolvedAt: request.resolvedAt,
+          resolvedByUserId: request.resolvedByUserId,
+          room: {
+            id: request.room.id,
+            number: request.room.number,
+            status: request.room.status,
+            type: request.room.type,
+          },
+          roomId: request.roomId,
+          roomStatus: request.roomStatus,
+          status: request.status,
+          updatedAt: request.updatedAt,
         })),
         hotelReservations: property.hotelReservations.map((reservation) => ({
           adultCount: reservation.adultCount,
@@ -2490,6 +2581,208 @@ export class PropertiesController {
     });
   }
 
+  @Post(":propertyId/maintenance-requests")
+  @RequirePermission("rooms.read")
+  async createMaintenanceRequest(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Body() body: CreateMaintenanceRequestDto,
+  ): Promise<unknown> {
+    this.assertCanManageMaintenance(context);
+    await this.findTenantProperty(context.tenant.id, propertyId);
+
+    const room = await this.findTenantRoom(
+      context.tenant.id,
+      propertyId,
+      body.roomId,
+    );
+    const activeStay = await this.prisma.stay.findFirst({
+      where: {
+        roomId: room.id,
+        status: "active",
+        tenantId: context.tenant.id,
+      },
+    });
+
+    if (activeStay) {
+      throw new BadRequestException(
+        "Move or check out the active guest before blocking this room for maintenance.",
+      );
+    }
+
+    const activeRequest = await this.prisma.maintenanceRequest.findFirst({
+      where: {
+        roomId: room.id,
+        status: { in: ["open", "in_progress"] },
+        tenantId: context.tenant.id,
+      },
+    });
+
+    if (activeRequest) {
+      throw new BadRequestException(
+        "This room already has an active maintenance request.",
+      );
+    }
+
+    const roomStatus = body.roomStatus ?? "maintenance";
+
+    return this.prisma.$transaction(async (tx) => {
+      const request = await tx.maintenanceRequest.create({
+        data: {
+          assignedUserId: body.assignedUserId,
+          notes: body.notes,
+          priority: body.priority ?? "normal",
+          propertyId,
+          reason: body.reason,
+          reportedByUserId: context.tenantUser.clerkUserId,
+          roomId: room.id,
+          roomStatus,
+          tenantId: context.tenant.id,
+        },
+        include: { room: true },
+      });
+
+      await tx.room.update({
+        where: { id: room.id },
+        data: { status: roomStatus },
+      });
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: "maintenance_request_created",
+          newState: {
+            priority: request.priority,
+            reason: request.reason,
+            requestId: request.id,
+            roomStatus,
+            status: request.status,
+          },
+          previousState: { roomStatus: room.status },
+          propertyId,
+          roomId: room.id,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      return {
+        ...request,
+        room: { ...request.room, status: roomStatus },
+      };
+    });
+  }
+
+  @Patch(":propertyId/maintenance-requests/:requestId")
+  @RequirePermission("rooms.read")
+  async updateMaintenanceRequest(
+    @CurrentTenant() context: TenantContext,
+    @Param("propertyId") propertyId: string,
+    @Param("requestId") requestId: string,
+    @Body() body: UpdateMaintenanceRequestDto,
+  ): Promise<unknown> {
+    this.assertCanManageMaintenance(context);
+    await this.findTenantProperty(context.tenant.id, propertyId);
+
+    const request = await this.prisma.maintenanceRequest.findFirst({
+      where: {
+        id: requestId,
+        propertyId,
+        tenantId: context.tenant.id,
+      },
+      include: { room: true },
+    });
+
+    if (!request) {
+      throw new BadRequestException(
+        "Maintenance request was not found for this property.",
+      );
+    }
+
+    if (
+      ["resolved", "cancelled"].includes(request.status) &&
+      request.status !== body.status
+    ) {
+      throw new BadRequestException(
+        "Closed maintenance requests cannot be reopened.",
+      );
+    }
+
+    if (body.status === "resolved" && !body.resolutionNotes?.trim()) {
+      throw new BadRequestException(
+        "Add resolution notes before releasing the room.",
+      );
+    }
+
+    const now = new Date();
+    const closesRequest = ["resolved", "cancelled"].includes(body.status);
+    const nextRoomStatus = closesRequest ? "available" : request.room.status;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updatedRequest = await tx.maintenanceRequest.update({
+        where: { id: request.id },
+        data: {
+          assignedUserId:
+            body.assignedUserId ??
+            (body.status === "in_progress"
+              ? context.tenantUser.clerkUserId
+              : request.assignedUserId),
+          notes: body.notes ?? request.notes,
+          resolutionNotes: body.resolutionNotes ?? request.resolutionNotes,
+          resolvedAt: closesRequest ? now : request.resolvedAt,
+          resolvedByUserId: closesRequest
+            ? context.tenantUser.clerkUserId
+            : request.resolvedByUserId,
+          status: body.status,
+        },
+        include: { room: true },
+      });
+
+      if (nextRoomStatus !== request.room.status) {
+        await tx.room.update({
+          where: { id: request.roomId },
+          data: { status: nextRoomStatus },
+        });
+      }
+
+      await tx.hotelAuditLog.create({
+        data: {
+          actorId: context.tenantUser.clerkUserId,
+          actorRole: context.role,
+          event: "maintenance_request_updated",
+          newState: {
+            requestId: updatedRequest.id,
+            resolutionNotes: updatedRequest.resolutionNotes,
+            roomStatus: nextRoomStatus,
+            status: updatedRequest.status,
+          },
+          previousState: {
+            roomStatus: request.room.status,
+            status: request.status,
+          },
+          propertyId,
+          roomId: request.roomId,
+          tenantId: context.tenant.id,
+        },
+      });
+
+      return {
+        ...updatedRequest,
+        room: { ...updatedRequest.room, status: nextRoomStatus },
+      };
+    });
+  }
+
+  private assertCanManageMaintenance(context: TenantContext): void {
+    if (
+      context.role !== "maintenance" &&
+      !hasTenantPermission(context.role, "property.manage")
+    ) {
+      throw new BadRequestException(
+        "Your role cannot manage maintenance requests.",
+      );
+    }
+  }
   private async findTenantProperty(tenantId: string, propertyId: string) {
     const property = await this.prisma.property.findFirst({
       where: { id: propertyId, tenantId },

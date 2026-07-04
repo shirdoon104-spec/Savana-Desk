@@ -8,16 +8,16 @@ datasource db {
 }
 
 model Tenant {
-  id                    String             @id @default(cuid())
+  id                    String               @id @default(cuid())
   name                  String
-  slug                  String             @unique
-  clerkOrgId            String             @unique
-  operatingModel        String             @default("hotel_restaurant")
+  slug                  String               @unique
+  clerkOrgId            String               @unique
+  operatingModel        String               @default("hotel_restaurant")
   mobileMoneyProvider   String?
   onboardingCompletedAt DateTime?
-  status                String             @default("active")
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
+  status                String               @default("active")
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
   properties            Property[]
   users                 TenantUser[]
   stays                 Stay[]
@@ -25,6 +25,7 @@ model Tenant {
   customerInvoices      CustomerInvoice[]
   hotelAuditLogs        HotelAuditLog[]
   housekeepingTasks     HousekeepingTask[]
+  maintenanceRequests   MaintenanceRequest[]
   staffInvitations      StaffInvitation[]
 }
 
@@ -64,22 +65,22 @@ model StaffInvitation {
 }
 
 model Property {
-  id                     String             @id @default(cuid())
+  id                     String               @id @default(cuid())
   tenantId               String
   name                   String
   city                   String?
   roomCount              Int?
-  timezone               String             @default("Africa/Mogadishu")
-  currency               String             @default("USD")
+  timezone               String               @default("Africa/Mogadishu")
+  currency               String               @default("USD")
   taxRate                Decimal?
   serviceChargeRate      Decimal?
   earlyCheckInBeforeTime String?
-  earlyCheckInFeeType    String             @default("none")
-  earlyCheckInFeeValue   Decimal            @default(0)
+  earlyCheckInFeeType    String               @default("none")
+  earlyCheckInFeeValue   Decimal              @default(0)
   lateCheckoutAfterTime  String?
-  lateCheckoutFeeType    String             @default("none")
-  lateCheckoutFeeValue   Decimal            @default(0)
-  tenant                 Tenant             @relation(fields: [tenantId], references: [id])
+  lateCheckoutFeeType    String               @default("none")
+  lateCheckoutFeeValue   Decimal              @default(0)
+  tenant                 Tenant               @relation(fields: [tenantId], references: [id])
   rooms                  Room[]
   roomTypes              RoomType[]
   ratePlans              RatePlan[]
@@ -89,9 +90,10 @@ model Property {
   hotelAuditLogs         HotelAuditLog[]
   hotelReservations      HotelReservation[]
   housekeepingTasks      HousekeepingTask[]
+  maintenanceRequests    MaintenanceRequest[]
   restaurants            Restaurant[]
-  createdAt              DateTime           @default(now())
-  updatedAt              DateTime           @updatedAt
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
 
   @@index([tenantId])
 }
@@ -135,21 +137,22 @@ model KitchenStation {
 }
 
 model Room {
-  id                String             @id @default(cuid())
-  tenantId          String
-  propertyId        String
-  roomTypeId        String?
-  number            String
-  type              String
-  status            RoomStatus         @default(available)
-  property          Property           @relation(fields: [propertyId], references: [id])
-  roomType          RoomType?          @relation(fields: [roomTypeId], references: [id])
-  stays             Stay[]
-  hotelAuditLogs    HotelAuditLog[]
-  hotelReservations HotelReservation[]
-  housekeepingTasks HousekeepingTask[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id                  String               @id @default(cuid())
+  tenantId            String
+  propertyId          String
+  roomTypeId          String?
+  number              String
+  type                String
+  status              RoomStatus           @default(available)
+  property            Property             @relation(fields: [propertyId], references: [id])
+  roomType            RoomType?            @relation(fields: [roomTypeId], references: [id])
+  stays               Stay[]
+  hotelAuditLogs      HotelAuditLog[]
+  hotelReservations   HotelReservation[]
+  housekeepingTasks   HousekeepingTask[]
+  maintenanceRequests MaintenanceRequest[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@unique([propertyId, number])
   @@index([tenantId, propertyId, status])
@@ -464,6 +467,8 @@ enum HotelAuditEvent {
   customer_invoice_generated
   housekeeping_task_created
   housekeeping_task_updated
+  maintenance_request_created
+  maintenance_request_updated
 }
 
 model HousekeepingTask {
@@ -512,6 +517,38 @@ enum HousekeepingPriority {
   normal
   high
   urgent
+}
+
+model MaintenanceRequest {
+  id               String                   @id @default(cuid())
+  tenantId         String
+  propertyId       String
+  roomId           String
+  status           MaintenanceRequestStatus @default(open)
+  priority         HousekeepingPriority     @default(normal)
+  roomStatus       RoomStatus               @default(maintenance)
+  reason           String
+  assignedUserId   String?
+  reportedByUserId String?
+  resolvedByUserId String?
+  resolvedAt       DateTime?
+  resolutionNotes  String?
+  notes            String?
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id])
+  property         Property                 @relation(fields: [propertyId], references: [id])
+  room             Room                     @relation(fields: [roomId], references: [id])
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@index([tenantId, propertyId, status])
+  @@index([tenantId, roomId, status])
+}
+
+enum MaintenanceRequestStatus {
+  open
+  in_progress
+  resolved
+  cancelled
 }
 
 enum InvoiceStatus {

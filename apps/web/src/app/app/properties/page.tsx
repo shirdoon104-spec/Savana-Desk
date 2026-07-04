@@ -22,6 +22,7 @@ type HotelWorkspaceTab =
   | "rooms"
   | "reservations"
   | "housekeeping"
+  | "maintenance"
   | "rates"
   | "setup";
 type RateWorkspaceTab = "quote" | "create" | "lists";
@@ -52,6 +53,11 @@ const hotelWorkspaceTabs: Array<{
     description: "Room turn",
   },
   {
+    id: "maintenance",
+    label: "Maintenance",
+    description: "Repairs",
+  },
+  {
     id: "rates",
     label: "Rates",
     description: "Pricing",
@@ -66,6 +72,7 @@ const hotelWorkspaceTabs: Array<{
 interface PropertyResponse {
   allowedRoomStatuses: string[];
   canManageBilling: boolean;
+  canManageMaintenance: boolean;
   canManageProperties: boolean;
   canManageRooms: boolean;
   canManageStays: boolean;
@@ -150,6 +157,28 @@ interface PropertyResponse {
       status: string;
       stayId: string | null;
       type: string;
+    }>;
+    maintenanceRequests: Array<{
+      assignedUserId: string | null;
+      createdAt: string;
+      id: string;
+      notes: string | null;
+      priority: string;
+      reason: string;
+      reportedByUserId: string | null;
+      resolutionNotes: string | null;
+      resolvedAt: string | null;
+      resolvedByUserId: string | null;
+      room: {
+        id: string;
+        number: string;
+        status: string;
+        type: string;
+      };
+      roomId: string;
+      roomStatus: string;
+      status: string;
+      updatedAt: string;
     }>;
     roomCount: number | null;
     ratePlans: Array<{
@@ -620,6 +649,15 @@ export default function PropertiesPage() {
   );
   const [reverseReason, setReverseReason] = useState("");
   const [reverseError, setReverseError] = useState<string | null>(null);
+  const [maintenanceRoomId, setMaintenanceRoomId] = useState("");
+  const [maintenanceReason, setMaintenanceReason] = useState("");
+  const [maintenancePriority, setMaintenancePriority] = useState("normal");
+  const [maintenanceRoomStatus, setMaintenanceRoomStatus] =
+    useState("maintenance");
+  const [maintenanceNotes, setMaintenanceNotes] = useState("");
+  const [maintenanceResolutionNotes, setMaintenanceResolutionNotes] = useState<
+    Record<string, string>
+  >({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const earliestExpectedCheckOutDate = useMemo(
     () => dateInputDaysFromNow(1),
@@ -796,6 +834,27 @@ export default function PropertiesPage() {
     return counts;
   }, [selectedProperty?.housekeepingTasks]);
 
+  const maintenanceCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const request of selectedProperty?.maintenanceRequests ?? []) {
+      counts.set(request.status, (counts.get(request.status) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [selectedProperty?.maintenanceRequests]);
+
+  const maintenanceCandidateRooms = useMemo(
+    () =>
+      selectedProperty?.rooms.filter(
+        (room) =>
+          !room.activeStay &&
+          !selectedProperty.maintenanceRequests.some(
+            (request) => request.roomId === room.id,
+          ),
+      ) ?? [],
+    [selectedProperty?.maintenanceRequests, selectedProperty?.rooms],
+  );
   const occupiedRoomCount = statusCounts.get("occupied") ?? 0;
   const availableRoomCount = statusCounts.get("available") ?? 0;
   const openHousekeepingTaskCount =
@@ -1447,6 +1506,114 @@ export default function PropertiesPage() {
     await loadProperties();
   }
 
+  async function createMaintenanceRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+
+    if (!token || !propertyId || !maintenanceRoomId) {
+      setError("Choose a room before creating a maintenance request.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/maintenance-requests`,
+        {
+          body: JSON.stringify({
+            notes: maintenanceNotes || undefined,
+            priority: maintenancePriority,
+            reason: maintenanceReason,
+            roomId: maintenanceRoomId,
+            roomStatus: maintenanceRoomStatus,
+          }),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        setError(
+          await readApiMessage(
+            response,
+            "Could not create maintenance request.",
+          ),
+        );
+        return;
+      }
+
+      setMaintenanceRoomId("");
+      setMaintenanceReason("");
+      setMaintenancePriority("normal");
+      setMaintenanceRoomStatus("maintenance");
+      setMaintenanceNotes("");
+      await loadProperties();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function updateMaintenanceRequest(requestId: string, status: string) {
+    const token = await getOrganizationToken();
+    const propertyId = selectedProperty?.id;
+
+    if (!token || !propertyId) {
+      setError("Choose a property before updating maintenance.");
+      return;
+    }
+
+    const resolutionNotes = maintenanceResolutionNotes[requestId]?.trim();
+
+    if (status === "resolved" && !resolutionNotes) {
+      setError("Add resolution notes before releasing the room.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/properties/${propertyId}/maintenance-requests/${requestId}`,
+        {
+          body: JSON.stringify({
+            resolutionNotes: resolutionNotes || undefined,
+            status,
+          }),
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+        },
+      );
+
+      if (!response.ok) {
+        setError(
+          await readApiMessage(
+            response,
+            "Could not update maintenance request.",
+          ),
+        );
+        return;
+      }
+
+      setMaintenanceResolutionNotes((current) => {
+        const next = { ...current };
+        delete next[requestId];
+        return next;
+      });
+      await loadProperties();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
   async function checkInGuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -2965,6 +3132,236 @@ export default function PropertiesPage() {
                 </section>
               ) : null}
 
+              {activeWorkspaceTab === "maintenance" ? (
+                <section
+                  className="notice-panel property-detail-card"
+                  id="maintenance-board"
+                >
+                  <div className="rate-management-header">
+                    <div>
+                      <p className="eyebrow">Maintenance</p>
+                      <h2>{selectedProperty.name}</h2>
+                      <p>
+                        Block damaged rooms, prioritize repairs, and release
+                        inventory after the work is verified.
+                      </p>
+                    </div>
+                    <span>
+                      {(maintenanceCounts.get("open") ?? 0) +
+                        (maintenanceCounts.get("in_progress") ?? 0)}{" "}
+                      active
+                    </span>
+                  </div>
+
+                  <div className="hotel-dashboard-grid">
+                    <div className="hotel-kpi-card">
+                      <span>Open</span>
+                      <strong>{maintenanceCounts.get("open") ?? 0}</strong>
+                      <small>Waiting for pickup</small>
+                    </div>
+                    <div className="hotel-kpi-card">
+                      <span>In progress</span>
+                      <strong>
+                        {maintenanceCounts.get("in_progress") ?? 0}
+                      </strong>
+                      <small>Repairs underway</small>
+                    </div>
+                    <div className="hotel-kpi-card">
+                      <span>Rooms blocked</span>
+                      <strong>{outOfServiceRoomCount}</strong>
+                      <small>Maintenance or out of order</small>
+                    </div>
+                  </div>
+
+                  {data?.canManageMaintenance ? (
+                    <form
+                      className="setup-form"
+                      onSubmit={createMaintenanceRequest}
+                    >
+                      <div className="rate-form-title">
+                        <strong>New maintenance request</strong>
+                      </div>
+                      <div className="field-grid">
+                        <label>
+                          Room
+                          <select
+                            onChange={(event) =>
+                              setMaintenanceRoomId(event.target.value)
+                            }
+                            required
+                            value={maintenanceRoomId}
+                          >
+                            <option value="">Select room</option>
+                            {maintenanceCandidateRooms.map((room) => (
+                              <option key={room.id} value={room.id}>
+                                {room.number} - {room.type} -{" "}
+                                {formatLabel(room.status)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Priority
+                          <select
+                            onChange={(event) =>
+                              setMaintenancePriority(event.target.value)
+                            }
+                            value={maintenancePriority}
+                          >
+                            <option value="low">Low</option>
+                            <option value="normal">Normal</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                          </select>
+                        </label>
+                        <label>
+                          Room status
+                          <select
+                            onChange={(event) =>
+                              setMaintenanceRoomStatus(event.target.value)
+                            }
+                            value={maintenanceRoomStatus}
+                          >
+                            <option value="maintenance">Maintenance</option>
+                            <option value="out_of_order">Out of order</option>
+                          </select>
+                        </label>
+                        <label>
+                          Reason
+                          <input
+                            maxLength={240}
+                            onChange={(event) =>
+                              setMaintenanceReason(event.target.value)
+                            }
+                            placeholder="Air conditioner is not cooling"
+                            required
+                            value={maintenanceReason}
+                          />
+                        </label>
+                      </div>
+                      <label>
+                        Notes
+                        <textarea
+                          maxLength={500}
+                          onChange={(event) =>
+                            setMaintenanceNotes(event.target.value)
+                          }
+                          placeholder="Access instructions, parts required, or safety notes"
+                          rows={3}
+                          value={maintenanceNotes}
+                        />
+                      </label>
+                      <button
+                        className="primary-button"
+                        disabled={
+                          isSubmitting || !maintenanceCandidateRooms.length
+                        }
+                        type="submit"
+                      >
+                        <Plus aria-hidden="true" />
+                        Create request
+                      </button>
+                      {!maintenanceCandidateRooms.length ? (
+                        <small>
+                          No vacant rooms are currently eligible for a new
+                          maintenance request.
+                        </small>
+                      ) : null}
+                    </form>
+                  ) : (
+                    <div className="empty-state">
+                      Maintenance staff or property managers can update this
+                      board.
+                    </div>
+                  )}
+
+                  <div className="rate-list">
+                    {selectedProperty.maintenanceRequests.map((request) => (
+                      <article className="rate-list-item" key={request.id}>
+                        <div>
+                          <strong>Room {request.room.number}</strong>
+                          <span>
+                            {formatLabel(request.status)} -{" "}
+                            {formatLabel(request.priority)} -{" "}
+                            {formatLabel(request.roomStatus)}
+                          </span>
+                          <small>{request.reason}</small>
+                          {request.notes ? (
+                            <small>{request.notes}</small>
+                          ) : null}
+                          <small>
+                            Reported{" "}
+                            {new Date(request.createdAt).toLocaleString()}
+                          </small>
+                        </div>
+                        {data?.canManageMaintenance ? (
+                          <div className="room-action-row">
+                            {request.status === "open" ? (
+                              <button
+                                className="secondary-button"
+                                disabled={isSubmitting}
+                                onClick={() =>
+                                  updateMaintenanceRequest(
+                                    request.id,
+                                    "in_progress",
+                                  )
+                                }
+                                type="button"
+                              >
+                                Start repair
+                              </button>
+                            ) : null}
+                            <label>
+                              Resolution notes
+                              <input
+                                maxLength={500}
+                                onChange={(event) =>
+                                  setMaintenanceResolutionNotes((current) => ({
+                                    ...current,
+                                    [request.id]: event.target.value,
+                                  }))
+                                }
+                                placeholder="Repair completed and tested"
+                                value={
+                                  maintenanceResolutionNotes[request.id] ?? ""
+                                }
+                              />
+                            </label>
+                            <button
+                              className="secondary-button"
+                              disabled={isSubmitting}
+                              onClick={() =>
+                                updateMaintenanceRequest(
+                                  request.id,
+                                  "cancelled",
+                                )
+                              }
+                              type="button"
+                            >
+                              Cancel request
+                            </button>{" "}
+                            <button
+                              className="primary-button"
+                              disabled={isSubmitting}
+                              onClick={() =>
+                                updateMaintenanceRequest(request.id, "resolved")
+                              }
+                              type="button"
+                            >
+                              Resolve and release
+                            </button>
+                          </div>
+                        ) : null}
+                      </article>
+                    ))}
+                    {!selectedProperty.maintenanceRequests.length ? (
+                      <div className="empty-state">
+                        No active maintenance requests.
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
               {activeWorkspaceTab === "reservations" && data?.canManageStays ? (
                 <section
                   className="notice-panel reservation-management"
